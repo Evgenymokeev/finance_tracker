@@ -1,10 +1,25 @@
-from django.shortcuts import render
-from rest_framework import generics
+from rest_framework import viewsets
+
 from .models import Expense
 from .serializers import ExpenseSerializer
 
 
-class ExpenseListCreateView(generics.ListCreateAPIView):
+class ExpenseViewSet(viewsets.ModelViewSet):
     queryset = Expense.objects.all()
     serializer_class = ExpenseSerializer
-# Create your views here.
+
+    filterset_fields = [
+        "category",
+        "date",
+    ]
+
+    search_fields = [
+        "title",
+        "description",
+    ]
+
+    ordering_fields = [
+        "amount",
+        "date",
+        "created_at",
+    ]
