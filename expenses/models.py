@@ -1,7 +1,14 @@
+from django.contrib.auth.models import User
 from django.db import models
 
 
 class Expense(models.Model):
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE
+    )
+
     title = models.CharField(
         max_length=100,
         verbose_name="Название"
@@ -30,13 +37,3 @@ class Expense(models.Model):
     created_at = models.DateTimeField(
         auto_now_add=True
     )
-
-    class Meta:
-        ordering = ["-date"]
-        verbose_name = "Расход"
-        verbose_name_plural = "Расходы"
-
-    def __str__(self):
-        return f"{self.title} - {self.amount}"
-
-# Create your models here.
