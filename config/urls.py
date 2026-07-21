@@ -17,7 +17,12 @@ urlpatterns = [
 
     path(
         "api/expenses/",
-        include("expenses.urls"),
+        include("expenses.urls")
+    ),
+
+    path(
+        "api/auth/",
+        include("users.urls")
     ),
 
     path(
