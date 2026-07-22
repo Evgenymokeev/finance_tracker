@@ -6,42 +6,39 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
-
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
 
     path(
-        "api/expenses/",
-        include("expenses.urls")
+        "admin/",
+        admin.site.urls,
     ),
 
-    path(
-        "api/auth/",
-        include("users.urls")
-    ),
 
     path(
-        "api/auth/login/",
-        TokenObtainPairView.as_view(),
-        name="token_obtain_pair",
+        "api/v1/",
+        include("expenses.urls"),
     ),
 
+
     path(
-        "api/auth/token/refresh/",
-        TokenRefreshView.as_view(),
-        name="token_refresh",
+        "api/v1/categories/",
+        include("categories.urls"),
     ),
+
+
+    path(
+        "api/v1/auth/",
+        include("users.urls"),
+    ),
+
 
     path(
         "api/schema/",
         SpectacularAPIView.as_view(),
         name="schema",
     ),
+
 
     path(
         "api/docs/",

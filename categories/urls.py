@@ -1,6 +1,6 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import ExpenseViewSet
+from .views import CategoryViewSet
 
 
 router = DefaultRouter()
@@ -8,8 +8,8 @@ router = DefaultRouter()
 
 router.register(
     "",
-    ExpenseViewSet,
-    basename="expenses"
+    CategoryViewSet,
+    basename="categories"
 )
 
 

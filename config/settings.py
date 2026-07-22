@@ -39,9 +39,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     'rest_framework',
-    "django_filters",
-"drf_spectacular",
-    'expenses',
+    'django_filters',
+    'drf_spectacular',
+
+    'categories.apps.CategoriesConfig',
+    'expenses.apps.ExpensesConfig',
     'users',
 ]
 

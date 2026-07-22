@@ -2,44 +2,39 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 
-from .models import Expense
-from .serializers import ExpenseSerializer
+from .models import Category
+from .serializers import CategorySerializer
 
 
 @extend_schema(
-    tags=["Expenses"]
+    tags=["Categories"]
 )
-class ExpenseViewSet(viewsets.ModelViewSet):
+class CategoryViewSet(viewsets.ModelViewSet):
 
-    serializer_class = ExpenseSerializer
+    serializer_class = CategorySerializer
 
     permission_classes = [
         IsAuthenticated,
     ]
 
-    filterset_fields = [
-        "category",
-        "date",
-    ]
-
     search_fields = [
-        "title",
-        "description",
+        "name",
     ]
 
     ordering_fields = [
-        "amount",
-        "date",
-        "created_at",
+        "name",
     ]
 
     def get_queryset(self):
-        return Expense.objects.filter(
+        return Category.objects.filter(
             user=self.request.user
-        ).order_by("-date",
+        ).order_by("name",
     "-created_at")
+
 
     def perform_create(self, serializer):
         serializer.save(
             user=self.request.user
         )
+
+# Create your views here.
