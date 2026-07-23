@@ -1,6 +1,6 @@
 from django.db.models import Sum
 from django.utils import timezone
-
+from django.db.models.functions import TruncMonth
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -9,7 +9,10 @@ from drf_spectacular.utils import extend_schema
 
 from expenses.models import Expense
 
-from .serializers import DashboardSerializer
+from .serializers import (
+    DashboardSerializer,
+    MonthlyAnalyticsSerializer,
+)
 
 
 @extend_schema(
@@ -83,3 +86,55 @@ class DashboardView(APIView):
         )
 
 # Create your views here.
+@extend_schema(
+    tags=["Analytics"],
+    responses=MonthlyAnalyticsSerializer,
+)
+class MonthlyAnalyticsView(APIView):
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+
+    def get(self, request):
+
+        user = request.user
+
+
+        monthly_expenses = Expense.objects.filter(
+            user=user
+        ).annotate(
+            month=TruncMonth("date")
+        ).values(
+            "month"
+        ).annotate(
+            total=Sum("amount")
+        ).order_by(
+            "month"
+        )
+
+
+        data = {
+            "monthly_expenses": [
+                {
+                    "month": item["month"].strftime("%Y-%m"),
+                    "total": item["total"],
+                }
+                for item in monthly_expenses
+            ]
+        }
+
+
+        serializer = MonthlyAnalyticsSerializer(
+            data=data
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+
+        return Response(
+            serializer.data
+        )

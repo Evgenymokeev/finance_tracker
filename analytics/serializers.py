@@ -26,3 +26,19 @@ class DashboardSerializer(serializers.Serializer):
     expenses_by_category = CategoryStatisticSerializer(
         many=True
     )
+
+class MonthlyStatisticSerializer(serializers.Serializer):
+
+    month = serializers.CharField()
+
+    total = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+    )
+
+
+class MonthlyAnalyticsSerializer(serializers.Serializer):
+
+    monthly_expenses = MonthlyStatisticSerializer(
+        many=True
+    )
