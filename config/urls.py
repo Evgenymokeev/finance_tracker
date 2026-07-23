@@ -16,20 +16,26 @@ urlpatterns = [
 
 
     path(
-    "api/v1/",
-    include("expenses.urls"),
-),
+        "api/v1/",
+        include("expenses.urls"),
+    ),
 
 
-path(
-    "api/v1/categories/",
-    include("categories.urls"),
-),
+    path(
+        "api/v1/categories/",
+        include("categories.urls"),
+    ),
 
 
     path(
         "api/v1/auth/",
         include("users.urls"),
+    ),
+
+
+    path(
+        "api/v1/analytics/",
+        include("analytics.urls"),
     ),
 
 
@@ -47,4 +53,5 @@ path(
         ),
         name="swagger-ui",
     ),
+
 ]
