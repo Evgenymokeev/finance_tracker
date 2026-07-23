@@ -7,7 +7,7 @@ router = DefaultRouter()
 
 
 router.register(
-    "",
+    "expenses",
     ExpenseViewSet,
     basename="expenses"
 )

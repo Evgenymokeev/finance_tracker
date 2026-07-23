@@ -8,24 +8,19 @@ from rest_framework_simplejwt.views import (
 from drf_spectacular.utils import extend_schema
 
 from .serializers import RegisterSerializer
+from rest_framework.permissions import AllowAny
 
-
-@extend_schema(
-    tags=["Auth"]
-)
+@extend_schema(tags=["Auth"])
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
 
 
-@extend_schema(
-    tags=["Auth"]
-)
+@extend_schema(tags=["Auth"])
 class LoginView(TokenObtainPairView):
-    pass
+    permission_classes = [AllowAny]
 
 
-@extend_schema(
-    tags=["Auth"]
-)
+@extend_schema(tags=["Auth"])
 class RefreshView(TokenRefreshView):
-    pass
+    permission_classes = [AllowAny]

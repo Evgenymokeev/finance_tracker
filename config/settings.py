@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'categories.apps.CategoriesConfig',
     'expenses.apps.ExpensesConfig',
     'users',
+    "analytics",
 ]
 
 MIDDLEWARE = [

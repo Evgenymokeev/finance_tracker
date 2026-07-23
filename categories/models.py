@@ -19,17 +19,14 @@ class Category(models.Model):
 
 
     class Meta:
-     ordering = ["name"]
-
-    verbose_name = "Категория"
-    verbose_name_plural = "Категории"
+        ordering = ["name"]
 
     constraints = [
-            models.UniqueConstraint(
-                fields=["user", "name"],
-                name="unique_user_category"
-            )
-        ]
+        models.UniqueConstraint(
+            fields=["user", "name"],
+            name="unique_user_category",
+        ),
+    ]
 
     def save(self, *args, **kwargs):
         self.name = self.name.strip().capitalize()

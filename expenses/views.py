@@ -34,12 +34,17 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     ]
 
     def get_queryset(self):
+
+        if getattr(self, "swagger_fake_view", False):
+            return Expense.objects.none()
+
         return Expense.objects.filter(
             user=self.request.user
-        ).order_by("-date",
-    "-created_at")
+        ).order_by("-date")
+
 
     def perform_create(self, serializer):
+
         serializer.save(
             user=self.request.user
         )

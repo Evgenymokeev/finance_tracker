@@ -16,15 +16,15 @@ urlpatterns = [
 
 
     path(
-        "api/v1/",
-        include("expenses.urls"),
-    ),
+    "api/v1/",
+    include("expenses.urls"),
+),
 
 
-    path(
-        "api/v1/categories/",
-        include("categories.urls"),
-    ),
+path(
+    "api/v1/categories/",
+    include("categories.urls"),
+),
 
 
     path(

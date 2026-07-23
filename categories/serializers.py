@@ -1,5 +1,4 @@
 from rest_framework import serializers
-
 from .models import Category
 
 
@@ -22,13 +21,21 @@ class CategorySerializer(serializers.ModelSerializer):
 
     def validate_name(self, value):
 
+        value = value.strip()
+
         user = self.context["request"].user
 
-        if Category.objects.filter(
+        queryset = Category.objects.filter(
             user=user,
             name__iexact=value
-        ).exists():
+        )
 
+        if self.instance:
+            queryset = queryset.exclude(
+                id=self.instance.id
+            )
+
+        if queryset.exists():
             raise serializers.ValidationError(
                 "Такая категория уже существует."
             )

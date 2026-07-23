@@ -25,14 +25,19 @@ class CategoryViewSet(viewsets.ModelViewSet):
         "name",
     ]
 
+
     def get_queryset(self):
+
+        if getattr(self, "swagger_fake_view", False):
+            return Category.objects.none()
+
         return Category.objects.filter(
             user=self.request.user
-        ).order_by("name",
-    "-created_at")
+        ).order_by("name")
 
 
     def perform_create(self, serializer):
+
         serializer.save(
             user=self.request.user
         )
