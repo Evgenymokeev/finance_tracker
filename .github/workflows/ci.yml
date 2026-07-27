@@ -89,3 +89,18 @@ jobs:
           CELERY_RESULT_BACKEND: redis://localhost:6379/0
 
         run: python manage.py test
+
+      docker-build:
+
+    runs-on: ubuntu-latest
+
+    needs: test
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      - name: Build Docker image
+        run: docker build .
