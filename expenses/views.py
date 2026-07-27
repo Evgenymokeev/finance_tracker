@@ -1,7 +1,7 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
-
+from .tasks import send_expense_notification
 from .models import Expense
 from .serializers import ExpenseSerializer
 
@@ -44,7 +44,6 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
 
     def perform_create(self, serializer):
+        expense = serializer.save(user=self.request.user)
 
-        serializer.save(
-            user=self.request.user
-        )
+        send_expense_notification.delay(expense.id)

@@ -18,6 +18,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+
   redis:
     image: redis:7
     container_name: finance_tracker_redis
@@ -25,6 +26,7 @@ services:
 
     ports:
       - "6379:6379"
+
 
   web:
     build: .
@@ -38,12 +40,40 @@ services:
     ports:
       - "8000:8000"
 
-    env_file:
-      - .env
+    environment:
+      DEBUG: ${DEBUG}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
 
     depends_on:
       - db
       - redis
+
+
+  worker:
+    build: .
+    container_name: finance_tracker_worker
+
+    command: celery -A config worker -l info
+
+    volumes:
+      - .:/app
+
+    environment:
+      DEBUG: ${DEBUG}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+
+    depends_on:
+      - db
+      - redis
+
 
 volumes:
   postgres_data:
