@@ -1,4 +1,5 @@
 services:
+
   db:
     image: postgres:17
     container_name: finance_tracker_db
@@ -18,6 +19,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 
   redis:
     image: redis:7
@@ -27,9 +34,16 @@ services:
     ports:
       - "6379:6379"
 
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 
   web:
     build: .
+
     container_name: finance_tracker_web
 
     command: python manage.py runserver 0.0.0.0:8000
@@ -37,24 +51,24 @@ services:
     volumes:
       - .:/app
 
+    env_file:
+      - .env
+
     ports:
       - "8000:8000"
 
-    environment:
-      DEBUG: ${DEBUG}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-
     depends_on:
-      - db
-      - redis
+
+      db:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
 
 
   worker:
     build: .
+
     container_name: finance_tracker_worker
 
     command: celery -A config worker -l info
@@ -62,18 +76,18 @@ services:
     volumes:
       - .:/app
 
-    environment:
-      DEBUG: ${DEBUG}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
+    env_file:
+      - .env
 
     depends_on:
-      - db
-      - redis
+
+      db:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
 
 
 volumes:
+
   postgres_data:
