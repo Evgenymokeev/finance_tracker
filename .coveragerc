@@ -1,0 +1,4 @@
+[run]
+source = analytics, categories, expenses, users
+
+omit = */tests.py, */migrations/*
