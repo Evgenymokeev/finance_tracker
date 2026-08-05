@@ -153,4 +153,50 @@ class ExpenseAPITest(APITestCase):
             Expense.objects.count(),
             0
         )
+
+    def test_export_expenses_to_csv(self):
+        Expense.objects.create(
+            user=self.user,
+            title="Кофе",
+            amount="80.00",
+            category=self.category,
+            date="2026-07-23",
+            description="Latte"
+        )
+
+        response = self.client.get(
+            "/api/v1/expenses/export/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK
+        )
+
+        self.assertEqual(
+            response["Content-Type"],
+            "text/csv"
+        )
+
+        self.assertIn(
+            "attachment",
+            response["Content-Disposition"]
+        )
+
+        content = response.content.decode("utf-8")
+
+        self.assertIn(
+            "Date,Title,Category,Amount,Description",
+            content
+        )
+
+        self.assertIn(
+            "Кофе",
+            content
+        )
+
+        self.assertIn(
+            "Еда",
+            content
+        )
 # Create your tests here.
