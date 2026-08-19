@@ -63,3 +63,6 @@ class ExpenseSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+class ExpenseImportSerializer(serializers.Serializer):
+    file = serializers.FileField()

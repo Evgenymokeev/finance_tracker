@@ -1,23 +1,24 @@
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from categories.models import Category
+from expenses.importers import ExpenseCSVImporter
 from expenses.models import Expense
 
 
 class ExpenseAPITest(APITestCase):
 
     def setUp(self):
-        # Первый пользователь
         self.user = User.objects.create_user(
             username="testuser",
-            password="testpass123"
+            password="testpass123",
         )
 
         self.category = Category.objects.create(
             user=self.user,
-            name="Еда"
+            name="Еда",
         )
 
         self.client.force_authenticate(user=self.user)
@@ -28,29 +29,29 @@ class ExpenseAPITest(APITestCase):
             "amount": "80.00",
             "category": self.category.id,
             "date": "2026-07-23",
-            "description": "Latte"
+            "description": "Latte",
         }
 
         response = self.client.post(
             "/api/v1/expenses/",
-            data
+            data,
         )
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_201_CREATED
+            status.HTTP_201_CREATED,
         )
 
         self.assertEqual(
             Expense.objects.count(),
-            1
+            1,
         )
 
         expense = Expense.objects.first()
 
         self.assertEqual(
             expense.user,
-            self.user
+            self.user,
         )
 
     def test_unauthorized_user_cannot_create_expense(self):
@@ -61,28 +62,28 @@ class ExpenseAPITest(APITestCase):
             "amount": "120.00",
             "category": self.category.id,
             "date": "2026-07-24",
-            "description": "Latte"
+            "description": "Latte",
         }
 
         response = self.client.post(
             "/api/v1/expenses/",
-            data
+            data,
         )
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_401_UNAUTHORIZED
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     def test_user_sees_only_own_expenses(self):
         second_user = User.objects.create_user(
             username="seconduser",
-            password="testpass123"
+            password="testpass123",
         )
 
         second_category = Category.objects.create(
             user=second_user,
-            name="Транспорт"
+            name="Транспорт",
         )
 
         Expense.objects.create(
@@ -90,7 +91,7 @@ class ExpenseAPITest(APITestCase):
             title="Кофе",
             amount="80.00",
             category=self.category,
-            date="2026-07-23"
+            date="2026-07-23",
         )
 
         Expense.objects.create(
@@ -98,37 +99,39 @@ class ExpenseAPITest(APITestCase):
             title="Автобус",
             amount="40.00",
             category=second_category,
-            date="2026-07-23"
+            date="2026-07-23",
         )
 
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.get("/api/v1/expenses/")
+        response = self.client.get(
+            "/api/v1/expenses/",
+        )
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_200_OK
+            status.HTTP_200_OK,
         )
 
         self.assertEqual(
             len(response.data["results"]),
-            1
+            1,
         )
 
         self.assertEqual(
             response.data["results"][0]["title"],
-            "Кофе"
+            "Кофе",
         )
 
     def test_cannot_create_expense_with_foreign_category(self):
         second_user = User.objects.create_user(
             username="seconduser",
-            password="testpass123"
+            password="testpass123",
         )
 
         foreign_category = Category.objects.create(
             user=second_user,
-            name="Чужая категория"
+            name="Чужая категория",
         )
 
         data = {
@@ -136,22 +139,22 @@ class ExpenseAPITest(APITestCase):
             "amount": "80.00",
             "category": foreign_category.id,
             "date": "2026-07-23",
-            "description": "Latte"
+            "description": "Latte",
         }
 
         response = self.client.post(
             "/api/v1/expenses/",
-            data
+            data,
         )
-    
+
         self.assertEqual(
             response.status_code,
-            status.HTTP_400_BAD_REQUEST
+            status.HTTP_400_BAD_REQUEST,
         )
 
         self.assertEqual(
             Expense.objects.count(),
-            0
+            0,
         )
 
     def test_export_expenses_to_csv(self):
@@ -161,42 +164,464 @@ class ExpenseAPITest(APITestCase):
             amount="80.00",
             category=self.category,
             date="2026-07-23",
-            description="Latte"
+            description="Latte",
         )
 
         response = self.client.get(
-            "/api/v1/expenses/export/"
+            "/api/v1/expenses/export/",
         )
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_200_OK
+            status.HTTP_200_OK,
         )
 
         self.assertEqual(
             response["Content-Type"],
-            "text/csv"
+            "text/csv",
         )
 
         self.assertIn(
             "attachment",
-            response["Content-Disposition"]
+            response["Content-Disposition"],
         )
 
         content = response.content.decode("utf-8")
 
         self.assertIn(
             "Date,Title,Category,Amount,Description",
-            content
+            content,
         )
 
         self.assertIn(
             "Кофе",
-            content
+            content,
         )
 
         self.assertIn(
             "Еда",
-            content
+            content,
         )
-# Create your tests here.
+
+    def test_import_expenses_from_csv(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,Coffee,Еда,80,Latte\n"
+            "2026-08-02,Taxi,Еда,250,\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            2,
+        )
+
+        self.assertEqual(
+            response.data["errors"],
+            [],
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            2,
+        )
+
+    def test_import_expenses_with_unknown_category(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,Coffee,Несуществующая,80,Latte\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            len(response.data["errors"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            2,
+        )
+
+        self.assertIn(
+            "does not exist",
+            response.data["errors"][0]["error"],
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            0,
+        )
+
+    def test_import_expenses_partial_success(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,Coffee,Еда,80,Latte\n"
+            "2026-08-02,Taxi,Несуществующая,250,\n"
+            "2026-08-03,Lunch,Еда,150,\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            2,
+        )
+
+        self.assertEqual(
+            len(response.data["errors"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            3,
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            2,
+        )
+
+    def test_import_expenses_missing_columns(self):
+        csv_content = (
+            "date,title,amount\n"
+            "2026-08-01,Coffee,80\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            len(response.data["errors"]),
+            1,
+        )
+
+        self.assertIn(
+            "Missing required columns",
+            response.data["errors"][0]["error"],
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            0,
+        )
+
+    def test_unauthorized_user_cannot_import_expenses(self):
+        self.client.force_authenticate(user=None)
+
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,Coffee,Еда,80,Latte\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            0,
+        )
+
+    def test_import_invalid_utf8_csv(self):
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            b"\xff\xfe\xfd",
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            len(response.data["errors"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            1,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["error"],
+            "CSV file must be encoded in UTF-8.",
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            0,
+        )
+
+    def test_import_empty_csv(self):
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            b"",
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertEqual(
+            Expense.objects.count(),
+            0,
+        )
+
+    def test_import_expense_without_title(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,,Еда,80,Latte\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            2,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["error"],
+            "Title is required.",
+        )
+
+    def test_import_expense_without_category(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,Coffee,,80,Latte\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            2,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["error"],
+            "Category is required.",
+        )
+
+    def test_import_expense_without_amount(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            "2026-08-01,Coffee,Еда,,Latte\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            2,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["error"],
+            "Amount is required.",
+        )
+
+    def test_import_expense_without_date(self):
+        csv_content = (
+            "date,title,category,amount,description\n"
+            ",Coffee,Еда,80,Latte\n"
+        )
+
+        csv_file = SimpleUploadedFile(
+            "expenses.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/v1/expenses/import/",
+            {"file": csv_file},
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["created"],
+            0,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["row"],
+            2,
+        )
+
+        self.assertEqual(
+            response.data["errors"][0]["error"],
+            "Date is required.",
+        )

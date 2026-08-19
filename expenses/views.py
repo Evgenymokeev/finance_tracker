@@ -1,17 +1,24 @@
 import csv
-
+from rest_framework import status
 from django.conf import settings
 from django.http import HttpResponse
-
+from rest_framework.parsers import MultiPartParser
 from drf_spectacular.utils import extend_schema
-
+from rest_framework.response import Response
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
-
+from rest_framework.views import APIView
 from .models import Expense
 from .serializers import ExpenseSerializer
 from .tasks import send_expense_notification
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+)
+
+from .importers import ExpenseCSVImporter
+from .serializers import ExpenseImportSerializer
 
 
 @extend_schema(
@@ -92,3 +99,38 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             ])
 
         return response
+
+@extend_schema(
+    tags=["Expenses"],
+)
+class ExpenseImportView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser]
+
+    @extend_schema(
+        summary="Import expenses from CSV",
+        description=(
+            "Upload a CSV file with expenses. "
+            "Expected columns: date, title, category, amount, description."
+        ),
+        request=ExpenseImportSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Import result",
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = ExpenseImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        importer = ExpenseCSVImporter(user=request.user)
+
+        result = importer.import_file(
+            serializer.validated_data["file"]
+        )
+
+        return Response(
+            result,
+            status=status.HTTP_200_OK,
+        )
