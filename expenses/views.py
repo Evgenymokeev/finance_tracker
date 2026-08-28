@@ -1,24 +1,29 @@
 import csv
-from rest_framework import status
+
 from django.conf import settings
 from django.http import HttpResponse
+
+from rest_framework import status
+from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
-from drf_spectacular.utils import extend_schema
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from .models import Expense
-from .serializers import ExpenseSerializer
-from .tasks import send_expense_notification
+
 from drf_spectacular.utils import (
     OpenApiResponse,
     extend_schema,
 )
 
+from .filters import ExpenseFilter
 from .importers import ExpenseCSVImporter
-from .serializers import ExpenseImportSerializer
+from .models import Expense
+from .serializers import (
+    ExpenseImportSerializer,
+    ExpenseSerializer,
+)
+from .tasks import send_expense_notification
 
 
 @extend_schema(
@@ -31,10 +36,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         IsAuthenticated,
     ]
 
-    filterset_fields = [
-        "category",
-        "date",
-    ]
+    filterset_class = ExpenseFilter
 
     search_fields = [
         "title",

@@ -1,10 +1,10 @@
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from categories.models import Category
-from expenses.importers import ExpenseCSVImporter
 from expenses.models import Expense
 
 
@@ -21,7 +21,14 @@ class ExpenseAPITest(APITestCase):
             name="Еда",
         )
 
-        self.client.force_authenticate(user=self.user)
+        self.transport_category = Category.objects.create(
+            user=self.user,
+            name="Транспорт",
+        )
+
+        self.client.force_authenticate(
+            user=self.user
+        )
 
     def test_create_expense(self):
         data = {
@@ -55,7 +62,9 @@ class ExpenseAPITest(APITestCase):
         )
 
     def test_unauthorized_user_cannot_create_expense(self):
-        self.client.force_authenticate(user=None)
+        self.client.force_authenticate(
+            user=None
+        )
 
         data = {
             "title": "Coffee",
@@ -102,7 +111,9 @@ class ExpenseAPITest(APITestCase):
             date="2026-07-23",
         )
 
-        self.client.force_authenticate(user=self.user)
+        self.client.force_authenticate(
+            user=self.user
+        )
 
         response = self.client.get(
             "/api/v1/expenses/",
@@ -186,7 +197,9 @@ class ExpenseAPITest(APITestCase):
             response["Content-Disposition"],
         )
 
-        content = response.content.decode("utf-8")
+        content = response.content.decode(
+            "utf-8"
+        )
 
         self.assertIn(
             "Date,Title,Category,Amount,Description",
@@ -200,6 +213,58 @@ class ExpenseAPITest(APITestCase):
 
         self.assertIn(
             "Еда",
+            content,
+        )
+
+    def test_export_contains_only_own_expenses(self):
+        second_user = User.objects.create_user(
+            username="seconduser",
+            password="testpass123",
+        )
+
+        second_category = Category.objects.create(
+            user=second_user,
+            name="Транспорт",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Мой кофе",
+            amount="80.00",
+            category=self.category,
+            date="2026-07-23",
+            description="Latte",
+        )
+
+        Expense.objects.create(
+            user=second_user,
+            title="Чужой автобус",
+            amount="40.00",
+            category=second_category,
+            date="2026-07-23",
+            description="Bus",
+        )
+
+        response = self.client.get(
+            "/api/v1/expenses/export/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        content = response.content.decode(
+            "utf-8"
+        )
+
+        self.assertIn(
+            "Мой кофе",
+            content,
+        )
+
+        self.assertNotIn(
+            "Чужой автобус",
             content,
         )
 
@@ -379,7 +444,9 @@ class ExpenseAPITest(APITestCase):
         )
 
     def test_unauthorized_user_cannot_import_expenses(self):
-        self.client.force_authenticate(user=None)
+        self.client.force_authenticate(
+            user=None
+        )
 
         csv_content = (
             "date,title,category,amount,description\n"
@@ -624,4 +691,202 @@ class ExpenseAPITest(APITestCase):
         self.assertEqual(
             response.data["errors"][0]["error"],
             "Date is required.",
+        )
+
+    # ---------------------------------------------------------
+    # Expense filters
+    # ---------------------------------------------------------
+
+    def test_filter_expenses_by_date_range(self):
+        Expense.objects.create(
+            user=self.user,
+            title="Август",
+            amount="100.00",
+            category=self.category,
+            date="2026-08-15",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Июль",
+            amount="200.00",
+            category=self.category,
+            date="2026-07-15",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Сентябрь",
+            amount="300.00",
+            category=self.category,
+            date="2026-09-15",
+        )
+
+        response = self.client.get(
+            "/api/v1/expenses/",
+            {
+                "date_from": "2026-08-01",
+                "date_to": "2026-08-31",
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data["results"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["results"][0]["title"],
+            "Август",
+        )
+
+    def test_filter_expenses_by_amount_range(self):
+        Expense.objects.create(
+            user=self.user,
+            title="Дешёвый",
+            amount="50.00",
+            category=self.category,
+            date="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Подходит",
+            amount="250.00",
+            category=self.category,
+            date="2026-08-02",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Дорогой",
+            amount="700.00",
+            category=self.category,
+            date="2026-08-03",
+        )
+
+        response = self.client.get(
+            "/api/v1/expenses/",
+            {
+                "amount_from": "100",
+                "amount_to": "500",
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data["results"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["results"][0]["title"],
+            "Подходит",
+        )
+
+    def test_filter_expenses_by_category(self):
+        Expense.objects.create(
+            user=self.user,
+            title="Кофе",
+            amount="80.00",
+            category=self.category,
+            date="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Такси",
+            amount="300.00",
+            category=self.transport_category,
+            date="2026-08-02",
+        )
+
+        response = self.client.get(
+            "/api/v1/expenses/",
+            {
+                "category": self.transport_category.id,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data["results"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["results"][0]["title"],
+            "Такси",
+        )
+
+    def test_filter_expenses_combined(self):
+        Expense.objects.create(
+            user=self.user,
+            title="Кофе",
+            amount="80.00",
+            category=self.category,
+            date="2026-08-10",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Ресторан",
+            amount="300.00",
+            category=self.category,
+            date="2026-08-15",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Такси",
+            amount="250.00",
+            category=self.transport_category,
+            date="2026-08-20",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Старый расход",
+            amount="400.00",
+            category=self.category,
+            date="2026-07-20",
+        )
+
+        response = self.client.get(
+            "/api/v1/expenses/",
+            {
+                "date_from": "2026-08-01",
+                "date_to": "2026-08-31",
+                "amount_from": "200",
+                "amount_to": "350",
+                "category": self.category.id,
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data["results"]),
+            1,
+        )
+
+        self.assertEqual(
+            response.data["results"][0]["title"],
+            "Ресторан",
         )
