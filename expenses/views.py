@@ -1,4 +1,5 @@
 import csv
+from io import BytesIO
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -15,6 +16,8 @@ from drf_spectacular.utils import (
     OpenApiResponse,
     extend_schema,
 )
+
+from openpyxl import Workbook
 
 from .filters import ExpenseFilter
 from .importers import ExpenseCSVImporter
@@ -70,11 +73,19 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Export expenses to CSV",
-        description="Download all user expenses as a CSV file.",
+        description="Download user expenses as a CSV file.",
     )
-    @action(detail=False, methods=["get"], url_path="export")
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="export",
+    )
     def export_csv(self, request):
-        response = HttpResponse(content_type="text/csv")
+
+        response = HttpResponse(
+            content_type="text/csv"
+        )
+
         response["Content-Disposition"] = (
             'attachment; filename="expenses.csv"'
         )
@@ -89,7 +100,9 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             "Description",
         ])
 
-        expenses = self.get_queryset()
+        expenses = self.filter_queryset(
+            self.get_queryset()
+        )
 
         for expense in expenses:
             writer.writerow([
@@ -101,6 +114,75 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             ])
 
         return response
+
+    @extend_schema(
+        summary="Export expenses to Excel",
+        description=(
+            "Download user expenses as an Excel file. "
+            "All expense filters are supported."
+        ),
+        responses={
+            200: OpenApiResponse(
+                description="Excel file",
+            ),
+        },
+    )
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="export-excel",
+    )
+    def export_excel(self, request):
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Expenses"
+
+        worksheet.append([
+            "Date",
+            "Title",
+            "Category",
+            "Amount",
+            "Description",
+        ])
+
+        expenses = self.filter_queryset(
+            self.get_queryset()
+        )
+
+        for expense in expenses:
+            worksheet.append([
+                expense.date,
+                expense.title,
+                expense.category.name,
+                float(expense.amount),
+                expense.description,
+            ])
+
+        worksheet.column_dimensions["A"].width = 15
+        worksheet.column_dimensions["B"].width = 25
+        worksheet.column_dimensions["C"].width = 20
+        worksheet.column_dimensions["D"].width = 15
+        worksheet.column_dimensions["E"].width = 40
+
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+
+        response = HttpResponse(
+            output.getvalue(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+        )
+
+        response["Content-Disposition"] = (
+            'attachment; filename="expenses.xlsx"'
+        )
+
+        return response
+
 
 @extend_schema(
     tags=["Expenses"],
@@ -123,10 +205,18 @@ class ExpenseImportView(APIView):
         },
     )
     def post(self, request):
-        serializer = ExpenseImportSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
 
-        importer = ExpenseCSVImporter(user=request.user)
+        serializer = ExpenseImportSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        importer = ExpenseCSVImporter(
+            user=request.user
+        )
 
         result = importer.import_file(
             serializer.validated_data["file"]
