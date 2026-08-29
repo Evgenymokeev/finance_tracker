@@ -47,6 +47,7 @@ INSTALLED_APPS = [
 
     'categories.apps.CategoriesConfig',
     'expenses.apps.ExpensesConfig',
+    'budgets.apps.BudgetsConfig',
     'users',
     "analytics",
 ]

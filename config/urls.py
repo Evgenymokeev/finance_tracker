@@ -37,7 +37,10 @@ urlpatterns = [
         "api/v1/analytics/",
         include("analytics.urls"),
     ),
-
+    path(
+        "api/v1/budgets/",
+        include("budgets.urls"),
+    ),
 
     path(
         "api/schema/",
