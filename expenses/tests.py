@@ -633,6 +633,18 @@ class ExpenseAPITest(APITestCase):
             "Август",
         )
 
+    def test_unauthorized_user_cannot_export_excel(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.get(
+            "/api/v1/expenses/export-excel/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
     # =========================================================
     # CSV IMPORT
     # =========================================================
