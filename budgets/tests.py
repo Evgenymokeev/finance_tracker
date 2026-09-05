@@ -4,8 +4,10 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from categories.models import Category
-
+from expenses.models import Expense
+from notifications.models import Notification
 from .models import Budget
+from .tasks import check_budget_exceeded
 
 
 class BudgetAPITest(APITestCase):
@@ -434,4 +436,505 @@ class BudgetAPITest(APITestCase):
         self.assertEqual(
             response.data["results"][0]["month"],
             "2026-08-01",
+        )
+
+    def test_budget_progress(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="15000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Кофе",
+            amount="500.00",
+            category=self.category,
+            date="2026-08-05",
+            description="Coffee",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Обед",
+            amount="2500.00",
+            category=self.category,
+            date="2026-08-15",
+            description="Lunch",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["budget_amount"],
+            "15000.00",
+        )
+
+        self.assertEqual(
+            response.data["spent_amount"],
+            "3000.00",
+        )
+
+        self.assertEqual(
+            response.data["remaining_amount"],
+            "12000.00",
+        )
+
+        self.assertEqual(
+            response.data["percentage_used"],
+            20.0,
+        )
+
+        self.assertFalse(
+            response.data["is_exceeded"],
+        )
+
+    def test_budget_progress_is_exceeded(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Большая покупка",
+            amount="12000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Shopping",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["spent_amount"],
+            "12000.00",
+        )
+
+        self.assertEqual(
+            response.data["remaining_amount"],
+            "-2000.00",
+        )
+
+        self.assertEqual(
+            response.data["percentage_used"],
+            120.0,
+        )
+
+        self.assertTrue(
+            response.data["is_exceeded"],
+        )
+
+    def test_budget_progress_contains_only_own_expenses(self):
+        second_user = User.objects.create_user(
+            username="seconduser",
+            password="testpass123",
+        )
+
+        second_category = Category.objects.create(
+            user=second_user,
+            name="Транспорт",
+        )
+
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Мой кофе",
+            amount="2000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Coffee",
+        )
+
+        Expense.objects.create(
+            user=second_user,
+            title="Чужой расход",
+            amount="8000.00",
+            category=second_category,
+            date="2026-08-10",
+            description="Bus",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["spent_amount"],
+            "2000.00",
+        )
+
+    def test_budget_progress_respects_budget_month(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Август",
+            amount="3000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="August",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Июль",
+            amount="7000.00",
+            category=self.category,
+            date="2026-07-10",
+            description="July",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["spent_amount"],
+            "3000.00",
+        )
+
+        self.assertEqual(
+            response.data["remaining_amount"],
+            "7000.00",
+        )
+
+        self.assertEqual(
+            response.data["percentage_used"],
+            30.0,
+        )
+
+    def test_check_budget_exceeded(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Большая покупка",
+            amount="12000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Shopping",
+        )
+
+        result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "exceeded",
+        )
+
+        self.assertEqual(
+            result["budget_amount"],
+            "10000.00",
+        )
+
+        self.assertEqual(
+            result["spent_amount"],
+            "12000.00",
+        )
+
+    def test_check_budget_not_exceeded(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Кофе",
+            amount="2000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Coffee",
+        )
+
+        result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "within_limit",
+        )
+
+        self.assertEqual(
+            result["budget_amount"],
+            "10000.00",
+        )
+
+        self.assertEqual(
+            result["spent_amount"],
+            "2000.00",
+        )
+
+    def test_check_budget_exceeded_ignores_other_users_expenses(self):
+        second_user = User.objects.create_user(
+            username="seconduser",
+            password="testpass123",
+        )
+
+        second_category = Category.objects.create(
+            user=second_user,
+            name="Транспорт",
+        )
+
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Мой расход",
+            amount="2000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="My expense",
+        )
+
+        Expense.objects.create(
+            user=second_user,
+            title="Чужой расход",
+            amount="20000.00",
+            category=second_category,
+            date="2026-08-10",
+            description="Other user",
+        )
+
+        result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "within_limit",
+        )
+
+        self.assertEqual(
+            result["spent_amount"],
+            "2000.00",
+        )
+
+    def test_check_budget_exceeded_respects_budget_month(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Август",
+            amount="3000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="August",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Июль",
+            amount="20000.00",
+            category=self.category,
+            date="2026-07-10",
+            description="July",
+        )
+
+        result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "within_limit",
+        )
+
+        self.assertEqual(
+            result["spent_amount"],
+            "3000.00",
+        )
+
+    def test_check_budget_exceeded_budget_not_found(self):
+        result = check_budget_exceeded(
+            999999,
+        )
+
+        self.assertEqual(
+            result,
+            "Budget 999999 not found",
+        )
+
+    def test_check_budget_exceeded_creates_notification(self):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Большая покупка",
+            amount="12000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Shopping",
+        )
+
+        result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "exceeded",
+        )
+
+        self.assertTrue(
+            result["notification_created"],
+        )
+
+        self.assertEqual(
+            Notification.objects.count(),
+            1,
+        )
+
+        notification = Notification.objects.first()
+
+        self.assertEqual(
+            notification.user,
+            self.user,
+        )
+
+        self.assertEqual(
+            notification.budget,
+            budget,
+        )
+
+        self.assertEqual(
+            notification.notification_type,
+            Notification.NotificationType.BUDGET_EXCEEDED,
+        )
+
+    def test_check_budget_exceeded_does_not_create_duplicate_notification(
+        self,
+    ):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Большая покупка",
+            amount="12000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Shopping",
+        )
+
+        first_result = check_budget_exceeded(
+            budget.id,
+        )
+
+        second_result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertTrue(
+            first_result["notification_created"],
+        )
+
+        self.assertFalse(
+            second_result["notification_created"],
+        )
+
+        self.assertEqual(
+            Notification.objects.count(),
+            1,
+        )
+
+    def test_check_budget_not_exceeded_does_not_create_notification(
+        self,
+    ):
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            title="Кофе",
+            amount="2000.00",
+            category=self.category,
+            date="2026-08-10",
+            description="Coffee",
+        )
+
+        result = check_budget_exceeded(
+            budget.id,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "within_limit",
+        )
+
+        self.assertEqual(
+            Notification.objects.count(),
+            0,
         )

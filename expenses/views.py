@@ -1,7 +1,6 @@
 import csv
 from io import BytesIO
 
-from django.conf import settings
 from django.http import HttpResponse
 
 from rest_framework import status
@@ -26,7 +25,8 @@ from .serializers import (
     ExpenseImportSerializer,
     ExpenseSerializer,
 )
-from .tasks import send_expense_notification
+from .services import create_expense
+
 
 
 @extend_schema(
@@ -66,10 +66,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        expense = serializer.save(user=self.request.user)
+        create_expense(
+            user=self.request.user,
+            **serializer.validated_data,
+    )
 
-        if not settings.TESTING:
-            send_expense_notification.delay(expense.id)
 
     @extend_schema(
         summary="Export expenses to CSV",
