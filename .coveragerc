@@ -1,4 +1,13 @@
 [run]
-source = analytics, categories, expenses, users
+source =
+    analytics,
+    categories,
+    expenses,
+    users,
+    budgets,
+    notifications,
+       goals,
 
-omit = */tests.py, */migrations/*
+omit =
+    */tests.py
+    */migrations/*

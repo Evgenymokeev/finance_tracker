@@ -15,6 +15,17 @@ urlpatterns = [
     ),
 
 
+    # Goals должен находиться ВЫШЕ общего маршрута Expenses.
+    #
+    # Expenses использует общий prefix "api/v1/".
+    # Поэтому Django иначе может попытаться обработать
+    # /api/v1/goals/ через expenses.urls.
+    path(
+        "api/v1/goals/",
+        include("goals.urls"),
+    ),
+
+
     path(
         "api/v1/",
         include("expenses.urls"),

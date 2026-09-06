@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'expenses.apps.ExpensesConfig',
     'budgets.apps.BudgetsConfig',
     "notifications",
+    "goals",
     'users',
     "analytics",
 ]
