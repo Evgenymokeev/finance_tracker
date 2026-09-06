@@ -29,6 +29,15 @@ class Expense(models.Model):
         verbose_name="Категория",
     )
 
+    goal = models.ForeignKey(
+        "goals.FinancialGoal",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="expenses",
+        verbose_name="Финансовая цель",
+    )
+
     date = models.DateField(
         verbose_name="Дата",
     )

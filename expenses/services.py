@@ -18,6 +18,7 @@ def create_expense(
     category,
     date,
     description="",
+    goal=None,
 ):
     if isinstance(date, str):
         date = date_type.fromisoformat(date)
@@ -27,6 +28,7 @@ def create_expense(
         title=title,
         amount=Decimal(str(amount)),
         category=category,
+        goal=goal,
         date=date,
         description=description or "",
     )

@@ -61,15 +61,30 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             Expense.objects.filter(
                 user=self.request.user
             )
-            .select_related("category")
+            .select_related("category","goal")
             .order_by("-date")
         )
 
     def perform_create(self, serializer):
-        create_expense(
+        """
+        Создаёт расход через service layer.
+
+        Service отвечает за:
+        - создание Expense;
+        - запуск связанных Celery-задач;
+        - проверку бюджета.
+
+        После создания сохраняем созданный объект
+        в serializer.instance, чтобы DRF корректно
+        сформировал ответ POST.
+        """
+
+        expense = create_expense(
             user=self.request.user,
             **serializer.validated_data,
-    )
+        )
+
+        serializer.instance = expense
 
 
     @extend_schema(

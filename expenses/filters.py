@@ -24,10 +24,15 @@ class ExpenseFilter(django_filters.FilterSet):
         lookup_expr="lte",
     )
 
+    goal = django_filters.NumberFilter(
+        field_name="goal",
+    )
+
     class Meta:
         model = Expense
         fields = [
             "category",
+            "goal",
             "date",
             "date_from",
             "date_to",
