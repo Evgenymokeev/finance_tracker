@@ -21,28 +21,20 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
     - просматривать только свои цели;
     - изменять только свои цели;
     - удалять только свои цели;
-    - пополнять свои цели.
+    - пополнять свои цели;
+    - снимать деньги со своих целей;
+    - отменять активные цели.
     """
 
     serializer_class = FinancialGoalSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """
-        Возвращает только финансовые цели
-        текущего пользователя.
-        """
-
         return FinancialGoal.objects.filter(
             user=self.request.user
         )
 
     def perform_create(self, serializer):
-        """
-        Автоматически привязывает новую цель
-        к текущему авторизованному пользователю.
-        """
-
         serializer.save(
             user=self.request.user
         )
@@ -62,20 +54,29 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         POST /api/v1/goals/{id}/deposit/
 
-        Пример запроса:
-
+        Пример:
         {
             "amount": "5000.00"
         }
 
-        После пополнения:
-        - увеличивается current_amount;
-        - пересчитывается progress_percent;
-        - пересчитывается remaining_amount;
-        - если цель достигнута, status становится completed.
+        Правила:
+        - cancelled цель нельзя пополнять;
+        - если после пополнения достигнут target_amount,
+          цель становится completed.
         """
 
         goal = self.get_object()
+
+        # Отменённую цель больше нельзя пополнять.
+        if goal.status == FinancialGoal.Status.CANCELLED:
+            return Response(
+                {
+                    "status": (
+                        "Cancelled goals cannot receive deposits."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         serializer = GoalDepositSerializer(
             data=request.data
@@ -119,21 +120,30 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         POST /api/v1/goals/{id}/withdraw/
 
-        Пример запроса:
-
+        Пример:
         {
             "amount": "5000.00"
         }
 
-        После снятия:
-        - уменьшается current_amount;
-        - пересчитывается progress_percent;
-        - пересчитывается remaining_amount;
-        - если цель ранее была completed,
+        Правила:
+        - cancelled цель нельзя изменять;
+        - нельзя снять больше текущей суммы;
+        - если completed цель уменьшилась ниже target_amount,
           она снова становится active.
         """
 
         goal = self.get_object()
+
+        # Отменённую цель больше нельзя изменять.
+        if goal.status == FinancialGoal.Status.CANCELLED:
+            return Response(
+                {
+                    "status": (
+                        "Cancelled goals cannot be withdrawn from."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         serializer = GoalWithdrawSerializer(
             data=request.data
@@ -165,6 +175,64 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
         ):
             goal.status = FinancialGoal.Status.ACTIVE
 
+        goal.save()
+
+        response_serializer = FinancialGoalSerializer(
+            goal
+        )
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        responses=FinancialGoalSerializer,
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="cancel",
+    )
+    def cancel(self, request, pk=None):
+        """
+        Отменяет финансовую цель.
+
+        POST /api/v1/goals/{id}/cancel/
+
+        Правила:
+        - active -> cancelled;
+        - completed нельзя отменить;
+        - cancelled нельзя отменить повторно;
+        - текущая накопленная сумма не изменяется.
+        """
+
+        goal = self.get_object()
+
+        # Завершённую цель отменять нельзя.
+        if goal.status == FinancialGoal.Status.COMPLETED:
+            return Response(
+                {
+                    "status": (
+                        "Completed goals cannot be cancelled."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Нельзя отменить уже отменённую цель повторно.
+        if goal.status == FinancialGoal.Status.CANCELLED:
+            return Response(
+                {
+                    "status": (
+                        "Goal is already cancelled."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Active -> Cancelled.
+        goal.status = FinancialGoal.Status.CANCELLED
         goal.save()
 
         response_serializer = FinancialGoalSerializer(
