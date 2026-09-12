@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import FinancialGoal
+from .models import FinancialGoal, GoalAutomaticSaving
 
 
 class FinancialGoalSerializer(serializers.ModelSerializer):
@@ -125,3 +125,112 @@ class FinancialGoalSerializer(serializers.ModelSerializer):
         ) * Decimal("100")
 
         return round(float(progress), 2)
+
+class GoalAutomaticSavingSerializer(serializers.ModelSerializer):
+    """
+    Serializer для настройки автоматического накопления.
+
+    Бизнес-правила:
+    - amount должен быть больше 0;
+    - custom требует interval > 0;
+    - остальные frequency не используют interval;
+    - goal нельзя изменить через API;
+    - служебные поля нельзя изменить через API.
+    """
+
+    class Meta:
+        model = GoalAutomaticSaving
+
+        fields = [
+            "id",
+            "goal",
+            "amount",
+            "frequency",
+            "interval",
+            "next_run_at",
+            "last_run_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "goal",
+            "next_run_at",
+            "last_run_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_amount(self, value):
+        """
+        Проверяет, что сумма автоматического накопления
+        больше нуля.
+        """
+
+        if value <= Decimal("0"):
+            raise serializers.ValidationError(
+                "Amount must be greater than zero."
+            )
+
+        return value
+
+    def validate(self, attrs):
+        """
+        Проверяет зависимость frequency и interval.
+
+        custom:
+            interval обязателен и должен быть больше 0.
+
+        daily/weekly/monthly/yearly:
+            interval не используется.
+        """
+
+        frequency = attrs.get(
+            "frequency",
+            getattr(
+                self.instance,
+                "frequency",
+                None,
+            ),
+        )
+
+        interval = attrs.get(
+            "interval",
+            getattr(
+                self.instance,
+                "interval",
+                None,
+            ),
+        )
+
+        if (
+            frequency == GoalAutomaticSaving.Frequency.CUSTOM
+            and (
+                interval is None
+                or interval <= 0
+            )
+        ):
+            raise serializers.ValidationError(
+                {
+                    "interval": (
+                        "Interval must be greater than zero "
+                        "when frequency is custom."
+                    )
+                }
+            )
+
+        if (
+            frequency != GoalAutomaticSaving.Frequency.CUSTOM
+            and interval is not None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "interval": (
+                        "Interval can only be used "
+                        "with custom frequency."
+                    )
+                }
+            )
+        return attrs

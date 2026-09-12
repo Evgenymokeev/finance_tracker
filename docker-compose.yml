@@ -88,6 +88,28 @@ services:
         condition: service_healthy
 
 
+  beat:
+    build: .
+
+    container_name: finance_tracker_beat
+
+    command: celery -A config beat -l info
+
+    volumes:
+      - .:/app
+
+    env_file:
+      - .env
+
+    depends_on:
+
+      db:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+
 volumes:
 
   postgres_data:

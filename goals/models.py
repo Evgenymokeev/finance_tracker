@@ -59,3 +59,61 @@ class FinancialGoal(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class GoalAutomaticSaving(models.Model):
+
+    class Frequency(models.TextChoices):
+        DAILY = "daily", "Daily"
+        WEEKLY = "weekly", "Weekly"
+        MONTHLY = "monthly", "Monthly"
+        YEARLY = "yearly", "Yearly"
+        CUSTOM = "custom", "Custom"
+
+    goal = models.OneToOneField(
+        FinancialGoal,
+        on_delete=models.CASCADE,
+        related_name="automatic_saving",
+    )
+
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    frequency = models.CharField(
+        max_length=20,
+        choices=Frequency.choices,
+    )
+
+    interval = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    next_run_at = models.DateTimeField()
+
+    last_run_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["next_run_at"]
+
+    def __str__(self):
+        return (
+            f"Automatic saving for {self.goal.title}"
+        )
