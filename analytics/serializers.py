@@ -42,3 +42,50 @@ class MonthlyAnalyticsSerializer(serializers.Serializer):
     monthly_expenses = MonthlyStatisticSerializer(
         many=True
     )
+
+class GoalStatisticSerializer(serializers.Serializer):
+    """
+    Serializer статистики по одной финансовой цели.
+
+    Показывает:
+    - название цели;
+    - целевую сумму;
+    - накопленную сумму;
+    - сумму расходов, связанных с целью;
+    - сколько осталось накопить;
+    - процент прогресса.
+    """
+
+    goal = serializers.CharField()
+
+    target_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    current_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    spent_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    remaining_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    progress_percent = serializers.FloatField()
+
+
+class GoalsAnalyticsSerializer(serializers.Serializer):
+    """
+    Serializer списка статистики по финансовым целям.
+    """
+
+    goals = GoalStatisticSerializer(
+        many=True
+    )
