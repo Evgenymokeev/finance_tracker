@@ -2,7 +2,11 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import FinancialGoal, GoalAutomaticSaving
+from .models import (
+    FinancialGoal,
+    GoalAutomaticSaving,
+    GoalSavingTransaction,
+)
 
 
 class FinancialGoalSerializer(serializers.ModelSerializer):
@@ -234,3 +238,48 @@ class GoalAutomaticSavingSerializer(serializers.ModelSerializer):
                 }
             )
         return attrs
+
+
+class GoalSavingTransactionSerializer(serializers.ModelSerializer):
+    """
+    Serializer для просмотра истории операций финансовой цели.
+
+    История транзакций доступна только для чтения через API.
+
+    Бизнес-правила:
+    - транзакцию нельзя создать вручную через этот serializer;
+    - goal нельзя изменить через API;
+    - amount нельзя изменить через API;
+    - transaction_type нельзя изменить через API;
+    - source нельзя изменить через API;
+    - automatic_saving нельзя изменить через API;
+    - created_at нельзя изменить через API.
+
+    Создание транзакций выполняется бизнес-логикой:
+    - deposit;
+    - withdraw;
+    - automatic saving.
+    """
+
+    class Meta:
+        model = GoalSavingTransaction
+
+        fields = [
+            "id",
+            "goal",
+            "amount",
+            "transaction_type",
+            "source",
+            "automatic_saving",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "goal",
+            "amount",
+            "transaction_type",
+            "source",
+            "automatic_saving",
+            "created_at",
+        ]

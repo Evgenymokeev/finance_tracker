@@ -2,7 +2,11 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
-from .models import FinancialGoal, GoalAutomaticSaving
+from .models import (
+    FinancialGoal,
+    GoalAutomaticSaving,
+    GoalSavingTransaction,
+)
 from .services import calculate_next_run_at
 
 
@@ -41,7 +45,29 @@ def process_automatic_savings():
 
             goal = automatic_saving.goal
 
-            goal.current_amount += automatic_saving.amount
+            remaining_amount = (
+                goal.target_amount - goal.current_amount
+            )
+
+            saving_amount = min(
+                automatic_saving.amount,
+                remaining_amount,
+            )
+
+            if saving_amount <= 0:
+                continue
+
+            GoalSavingTransaction.objects.create(
+                goal=goal,
+                automatic_saving=automatic_saving,
+                amount=saving_amount,
+                transaction_type=(
+                    GoalSavingTransaction.TransactionType.DEPOSIT
+                ),
+                source=GoalSavingTransaction.Source.AUTOMATIC,
+            )
+
+            goal.current_amount += saving_amount
 
             if goal.current_amount >= goal.target_amount:
                 goal.current_amount = goal.target_amount

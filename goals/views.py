@@ -4,8 +4,14 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 
 from .deposit_serializers import GoalDepositSerializer
-from .models import FinancialGoal
-from .serializers import FinancialGoalSerializer
+from .models import (
+    FinancialGoal,
+    GoalSavingTransaction,
+)
+from .serializers import (
+    FinancialGoalSerializer,
+    GoalSavingTransactionSerializer,
+)
 from .withdraw_serializers import GoalWithdrawSerializer
 
 
@@ -88,13 +94,33 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         amount = serializer.validated_data["amount"]
 
-        goal.current_amount += amount
+        remaining_amount = (
+            goal.target_amount - goal.current_amount
+        )
+
+        effective_amount = min(
+            amount,
+            remaining_amount,
+        )
+
+        goal.current_amount += effective_amount
 
         if goal.current_amount >= goal.target_amount:
             goal.current_amount = goal.target_amount
             goal.status = FinancialGoal.Status.COMPLETED
 
         goal.save()
+
+        GoalSavingTransaction.objects.create(
+            goal=goal,
+            amount=effective_amount,
+            transaction_type=(
+                GoalSavingTransaction.TransactionType.DEPOSIT
+            ),
+            source=(
+                GoalSavingTransaction.Source.MANUAL
+            ),
+        )
 
         response_serializer = FinancialGoalSerializer(
             goal
@@ -177,6 +203,17 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         goal.save()
 
+        GoalSavingTransaction.objects.create(
+            goal=goal,
+            amount=amount,
+            transaction_type=(
+                GoalSavingTransaction.TransactionType.WITHDRAWAL
+            ),
+            source=(
+                GoalSavingTransaction.Source.MANUAL
+            ),
+        )
+
         response_serializer = FinancialGoalSerializer(
             goal
         )
@@ -243,3 +280,39 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
             response_serializer.data,
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        responses=GoalSavingTransactionSerializer(many=True),
+    )
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="transactions",
+    )
+    def transactions(self, request, pk=None):
+        """
+        Возвращает историю операций финансовой цели.
+
+        История содержит:
+
+        - ручные пополнения;
+        - ручные снятия;
+        - автоматические пополнения.
+
+        Доступ к истории возможен только для финансовой цели
+        текущего авторизованного пользователя.
+
+        Endpoint предназначен только для чтения.
+        """
+        goal = self.get_object()
+
+        transactions = GoalSavingTransaction.objects.filter(
+            goal=goal
+        )
+
+        serializer = GoalSavingTransactionSerializer(
+            transactions,
+            many=True,
+        )
+
+        return Response(serializer.data)

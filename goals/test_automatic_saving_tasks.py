@@ -5,7 +5,11 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import FinancialGoal, GoalAutomaticSaving
+from goals.models import (
+    FinancialGoal,
+    GoalAutomaticSaving,
+    GoalSavingTransaction,
+)
 from .tasks import process_automatic_savings
 
 
@@ -50,6 +54,7 @@ class AutomaticSavingTaskTests(TestCase):
         Если next_run_at уже наступил,
         сумма должна быть добавлена к цели.
         """
+
         automatic_saving = self.create_automatic_saving()
 
         result = process_automatic_savings()
@@ -78,6 +83,7 @@ class AutomaticSavingTaskTests(TestCase):
         Если next_run_at находится в будущем,
         автоматическое пополнение выполнять нельзя.
         """
+
         automatic_saving = self.create_automatic_saving(
             next_run_at=timezone.now() + timedelta(days=1),
         )
@@ -103,6 +109,7 @@ class AutomaticSavingTaskTests(TestCase):
         Неактивное автоматическое пополнение
         не должно обрабатываться.
         """
+
         automatic_saving = self.create_automatic_saving(
             is_active=False,
         )
@@ -128,6 +135,7 @@ class AutomaticSavingTaskTests(TestCase):
         Если цель уже completed,
         автоматические пополнения больше не выполняются.
         """
+
         self.goal.status = FinancialGoal.Status.COMPLETED
         self.goal.save()
 
@@ -157,6 +165,7 @@ class AutomaticSavingTaskTests(TestCase):
         Цель переводится в completed,
         а automatic saving отключается.
         """
+
         automatic_saving = self.create_automatic_saving(
             amount="800.00",
         )
@@ -199,6 +208,7 @@ class AutomaticSavingTaskTests(TestCase):
 
         Результат должен быть 1000, а не 1050.
         """
+
         self.goal.current_amount = Decimal("950.00")
         self.goal.save()
 
@@ -231,6 +241,7 @@ class AutomaticSavingTaskTests(TestCase):
         следующий запуск должен быть перенесён примерно
         на 7 дней вперёд.
         """
+
         automatic_saving = self.create_automatic_saving(
             frequency="weekly",
         )
@@ -260,6 +271,7 @@ class AutomaticSavingTaskTests(TestCase):
         Например interval=14 означает,
         что следующий запуск будет примерно через 14 дней.
         """
+
         automatic_saving = self.create_automatic_saving(
             frequency="custom",
             interval=14,
@@ -283,6 +295,7 @@ class AutomaticSavingTaskTests(TestCase):
         Поэтому повторный запуск Celery не должен
         сделать второй взнос сразу же.
         """
+
         automatic_saving = self.create_automatic_saving()
 
         process_automatic_savings()
@@ -303,4 +316,254 @@ class AutomaticSavingTaskTests(TestCase):
         self.assertEqual(
             self.goal.current_amount,
             Decimal("400.00"),
+        )
+
+    def test_automatic_saving_creates_transaction(self):
+        """
+        Проверяем основной сценарий Automatic Saving.
+
+        Когда Celery обрабатывает активное расписание, оно должно:
+
+        1. создать GoalSavingTransaction;
+        2. указать правильную сумму;
+        3. указать источник automatic;
+        4. связать транзакцию с конкретным Automatic Saving;
+        5. увеличить current_amount цели.
+        """
+
+        # Создаём пользователя, которому принадлежит финансовая цель.
+        user = User.objects.create_user(
+            username="task_transaction_user",
+            password="password123",
+        )
+
+        # Создаём активную цель.
+        # До автоматического пополнения на ней находится 200 из 1000.
+        goal = FinancialGoal.objects.create(
+            user=user,
+            title="Transaction Goal",
+            target_amount="1000.00",
+            current_amount="200.00",
+            status=FinancialGoal.Status.ACTIVE,
+        )
+
+        # Создаём Automatic Saving на 100.
+        # next_run_at устанавливаем в прошлое,
+        # чтобы задача считала расписание готовым к обработке.
+        automatic_saving = GoalAutomaticSaving.objects.create(
+            goal=goal,
+            amount="100.00",
+            frequency=GoalAutomaticSaving.Frequency.DAILY,
+            next_run_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        # Запускаем Celery task напрямую в тесте.
+        # Это позволяет проверить бизнес-логику задачи
+        # без необходимости реально ждать Celery Beat.
+        result = process_automatic_savings()
+
+        # После выполнения задачи должна появиться
+        # одна транзакция для нашей цели.
+        transaction = GoalSavingTransaction.objects.get(
+            goal=goal,
+        )
+
+        # Проверяем результат самой Celery-задачи.
+        self.assertEqual(
+            result,
+            {"processed": 1},
+        )
+
+        # В историю должна попасть именно сумма Automatic Saving.
+        self.assertEqual(
+            transaction.amount,
+            Decimal("100.00"),
+        )
+
+        # Automatic Saving создаёт именно пополнение.
+        self.assertEqual(
+            transaction.transaction_type,
+            GoalSavingTransaction.TransactionType.DEPOSIT,
+        )
+
+        # Источник операции должен быть automatic,
+        # а не manual.
+        self.assertEqual(
+            transaction.source,
+            GoalSavingTransaction.Source.AUTOMATIC,
+        )
+
+        # Проверяем связь транзакции
+        # с конкретным расписанием.
+        self.assertEqual(
+            transaction.automatic_saving,
+            automatic_saving,
+        )
+
+        # Получаем актуальное состояние цели из базы.
+        # Без refresh_from_db() объект goal всё ещё может содержать
+        # старое значение current_amount в памяти.
+        goal.refresh_from_db()
+
+        # 200 + 100 = 300.
+        self.assertEqual(
+            goal.current_amount,
+            Decimal("300.00"),
+        )
+
+    def test_automatic_saving_transaction_is_limited_by_remaining_amount(
+        self,
+    ):
+        """
+        Проверяем важный сценарий достижения цели.
+
+        Если Automatic Saving должен добавить больше денег,
+        чем осталось до target_amount, мы не должны записывать
+        лишнюю сумму.
+
+        Например:
+
+            current_amount = 250
+            target_amount = 300
+            automatic_saving = 100
+
+        Фактически можно добавить только 50.
+
+        Поэтому Transaction должна быть на 50,
+        а не на 100.
+        """
+
+        # Создаём пользователя.
+        user = User.objects.create_user(
+            username="task_transaction_limit_user",
+            password="password123",
+        )
+
+        # До цели осталось только 50.
+        goal = FinancialGoal.objects.create(
+            user=user,
+            title="Limited Transaction Goal",
+            target_amount="300.00",
+            current_amount="250.00",
+            status=FinancialGoal.Status.ACTIVE,
+        )
+
+        # Automatic Saving пытается добавить 100.
+        # Но цель позволяет добавить только оставшиеся 50.
+        automatic_saving = GoalAutomaticSaving.objects.create(
+            goal=goal,
+            amount="100.00",
+            frequency=GoalAutomaticSaving.Frequency.DAILY,
+            next_run_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        # Обрабатываем Automatic Saving.
+        result = process_automatic_savings()
+
+        # Получаем созданную транзакцию.
+        transaction = GoalSavingTransaction.objects.get(
+            goal=goal,
+        )
+
+        # Обновляем объекты из базы после выполнения task.
+        goal.refresh_from_db()
+        automatic_saving.refresh_from_db()
+
+        # Одна автоматическая операция должна быть обработана.
+        self.assertEqual(
+            result,
+            {"processed": 1},
+        )
+
+        # Очень важная проверка:
+        # в историю попадает только реально зачисленные 50.
+        self.assertEqual(
+            transaction.amount,
+            Decimal("50.00"),
+        )
+
+        # После пополнения цель должна быть ровно 300.
+        self.assertEqual(
+            goal.current_amount,
+            Decimal("300.00"),
+        )
+
+        # Цель достигнута, поэтому её статус
+        # меняется на completed.
+        self.assertEqual(
+            goal.status,
+            FinancialGoal.Status.COMPLETED,
+        )
+
+        # После достижения цели Automatic Saving
+        # больше не должен выполняться.
+        self.assertFalse(
+            automatic_saving.is_active,
+        )
+
+    def test_automatic_saving_transaction_is_created_atomically(self):
+        """
+        Проверяем согласованность изменения цели и создания транзакции.
+
+        В production это важно, потому что нам нельзя получить ситуацию,
+        когда:
+
+            Transaction создана,
+            но current_amount не обновился
+
+        или наоборот.
+
+        Вся операция выполняется внутри transaction.atomic().
+        """
+
+        # Создаём пользователя.
+        user = User.objects.create_user(
+            username="task_transaction_atomic_user",
+            password="password123",
+        )
+
+        # Создаём активную цель.
+        goal = FinancialGoal.objects.create(
+            user=user,
+            title="Atomic Goal",
+            target_amount="1000.00",
+            current_amount="200.00",
+            status=FinancialGoal.Status.ACTIVE,
+        )
+
+        # Создаём готовое к выполнению Automatic Saving.
+        automatic_saving = GoalAutomaticSaving.objects.create(
+            goal=goal,
+            amount="100.00",
+            frequency=GoalAutomaticSaving.Frequency.DAILY,
+            next_run_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        # Запускаем обработку.
+        result = process_automatic_savings()
+
+        # Проверяем, что Automatic Saving действительно обработан.
+        self.assertEqual(
+            result,
+            {"processed": 1},
+        )
+
+        # Должна существовать ровно одна транзакция,
+        # созданная именно этим Automatic Saving.
+        self.assertEqual(
+            GoalSavingTransaction.objects.filter(
+                goal=goal,
+                automatic_saving=automatic_saving,
+            ).count(),
+            1,
+        )
+
+        # Проверяем итоговое состояние цели.
+        goal.refresh_from_db()
+
+        # Баланс должен быть обновлён вместе
+        # с созданием транзакции.
+        self.assertEqual(
+            goal.current_amount,
+            Decimal("300.00"),
         )

@@ -21,3 +21,4 @@ staticfiles/
 .coverage
 htmlcov/
 .pytest_cache/
+celerybeat-schedule

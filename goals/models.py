@@ -117,3 +117,52 @@ class GoalAutomaticSaving(models.Model):
         return (
             f"Automatic saving for {self.goal.title}"
         )
+
+class GoalSavingTransaction(models.Model):
+
+    class TransactionType(models.TextChoices):
+        DEPOSIT = "deposit", "Deposit"
+        WITHDRAWAL = "withdrawal", "Withdrawal"
+
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        AUTOMATIC = "automatic", "Automatic"
+
+    goal = models.ForeignKey(
+        FinancialGoal,
+        on_delete=models.CASCADE,
+        related_name="saving_transactions",
+    )
+
+    automatic_saving = models.ForeignKey(
+        GoalAutomaticSaving,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+    )
+
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+    transaction_type = models.CharField(
+        max_length=20,
+        choices=TransactionType.choices,
+        default=TransactionType.DEPOSIT,
+    )
+
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.MANUAL,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.goal.title}: {self.amount}"
