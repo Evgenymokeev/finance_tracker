@@ -6,6 +6,8 @@ from .views import (
     RefreshView,
     ProfileView,
     ChangePasswordView,
+    UserSettingsView,
+    NotificationSettingsView,
 )
 
 
@@ -32,6 +34,18 @@ urlpatterns = [
         "profile/",
         ProfileView.as_view(),
         name="profile",
+    ),
+
+    path(
+        "settings/",
+        UserSettingsView.as_view(),
+        name="user-settings",
+    ),
+
+    path(
+        "notification-settings/",
+        NotificationSettingsView.as_view(),
+        name="notification-settings",
     ),
 
     path(

@@ -1,6 +1,11 @@
 from django.contrib.auth.models import User
-
 from rest_framework import serializers
+from django.db import transaction
+from .models import (
+    NotificationSettings,
+    UserProfile,
+    UserSettings,
+)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -15,11 +20,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = (
-            "username",
-            "email",
-            "password",
-        )
+        fields = ("username", "email", "password")
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -28,10 +29,24 @@ class RegisterSerializer(serializers.ModelSerializer):
             )
 
         return value
-
+    
+    @transaction.atomic
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        user = User.objects.create_user(**validated_data)
 
+        UserProfile.objects.create(
+            user=user,
+        )
+
+        UserSettings.objects.create(
+            user=user,
+        )
+
+        NotificationSettings.objects.create(
+            user=user,
+        )
+
+        return user
 
 class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
@@ -60,6 +75,26 @@ class ProfileSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+class UserSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSettings
+        fields = (
+            "language",
+            "currency",
+            "timezone",
+        )
+
+
+class NotificationSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationSettings
+        fields = (
+            "email_enabled",
+            "push_enabled",
+            "telegram_enabled",
+            "daily_summary",
+        )
 
 
 class ChangePasswordSerializer(serializers.Serializer):

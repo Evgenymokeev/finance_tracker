@@ -15,6 +15,12 @@ from .serializers import (
     RegisterSerializer,
     ProfileSerializer,
     ChangePasswordSerializer,
+    UserSettingsSerializer,
+    NotificationSettingsSerializer,
+)
+from .models import (
+    UserSettings,
+    NotificationSettings,
 )
 
 
@@ -41,6 +47,30 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+@extend_schema(tags=["Settings"])
+class UserSettingsView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserSettingsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        settings, created = UserSettings.objects.get_or_create(
+            user=self.request.user
+        )
+
+        return settings
+
+@extend_schema(tags=["Settings"])
+class NotificationSettingsView(generics.RetrieveUpdateAPIView):
+    serializer_class = NotificationSettingsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        settings, created = NotificationSettings.objects.get_or_create(
+            user=self.request.user
+        )
+
+        return settings
 
 
 @extend_schema(tags=["Profile"])
