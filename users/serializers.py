@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from rest_framework import serializers
 from django.db import transaction
 from .models import (
+    Household,
     NotificationSettings,
     UserProfile,
     UserSettings,
@@ -106,3 +107,22 @@ class ChangePasswordSerializer(serializers.Serializer):
         write_only=True,
         min_length=8,
     )
+
+
+class HouseholdSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Household
+        fields = (
+            "id",
+            "name",
+            "created_by",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "created_by",
+            "created_at",
+            "updated_at",
+        )

@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework.routers import DefaultRouter
 
 from .views import (
     RegisterView,
@@ -8,6 +9,7 @@ from .views import (
     ChangePasswordView,
     UserSettingsView,
     NotificationSettingsView,
+    HouseholdViewSet,
 )
 
 
@@ -54,3 +56,13 @@ urlpatterns = [
         name="change-password",
     ),
 ]
+
+router = DefaultRouter()
+
+router.register(
+    "households",
+    HouseholdViewSet,
+    basename="household",
+)
+
+urlpatterns += router.urls

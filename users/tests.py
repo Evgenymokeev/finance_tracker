@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import (
+    Household,
+    HouseholdMembership,
     NotificationSettings,
     UserProfile,
     UserSettings,
@@ -696,6 +698,77 @@ class UserProfileAPITest(APITestCase):
         self.assertNotEqual(
             response.data["daily_summary"],
             another_notification_settings.daily_summary
+        )
+
+    def test_create_household(self):
+        data = {
+            "name": "My Family",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/households/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED
+        )
+
+        # Проверяем, что Household действительно создан.
+        self.assertTrue(
+            Household.objects.filter(
+                name="My Family",
+                created_by=self.user,
+            ).exists()
+        )
+
+        household = Household.objects.get(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Проверяем, что создатель автоматически получил
+        # роль OWNER в HouseholdMembership.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                household=household,
+                user=self.user,
+                role=HouseholdMembership.Role.OWNER,
+            ).exists()
+        )
+
+        # Проверяем, что API возвращает основные данные Household.
+        self.assertEqual(
+            response.data["name"],
+            "My Family"
+        )
+
+        self.assertEqual(
+            response.data["created_by"],
+            self.user.id
+        )
+
+    def test_create_household_without_name(self):
+        data = {}
+
+        response = self.client.post(
+            "/api/v1/auth/households/",
+            data,
+            format="json",
+        )
+
+        # Название Household обязательно.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        # Household не должен создаваться при ошибке валидации.
+        self.assertEqual(
+            Household.objects.count(),
+            0
         )
 
 # Create your tests here.

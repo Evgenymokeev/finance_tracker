@@ -17,11 +17,15 @@ from .serializers import (
     ChangePasswordSerializer,
     UserSettingsSerializer,
     NotificationSettingsSerializer,
+    HouseholdSerializer,
 )
 from .models import (
-    UserSettings,
+    Household,
+    HouseholdMembership,
     NotificationSettings,
+    UserSettings,
 )
+from rest_framework import generics, status, viewsets
 
 
 @extend_schema(tags=["Auth"])
@@ -108,4 +112,26 @@ class ChangePasswordView(generics.GenericAPIView):
                 "detail": "Password changed successfully."
             },
             status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(tags=["Household"])
+class HouseholdViewSet(viewsets.ModelViewSet):
+    serializer_class = HouseholdSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Household.objects.filter(
+            memberships__user=self.request.user
+        ).distinct()
+
+    def perform_create(self, serializer):
+        household = serializer.save(
+            created_by=self.request.user
+        )
+
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.request.user,
+            role=HouseholdMembership.Role.OWNER,
         )
