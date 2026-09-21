@@ -25,6 +25,7 @@ from .models import (
     NotificationSettings,
     UserSettings,
 )
+from .permissions import IsHouseholdOwner
 from rest_framework import generics, status, viewsets
 
 
@@ -119,6 +120,21 @@ class ChangePasswordView(generics.GenericAPIView):
 class HouseholdViewSet(viewsets.ModelViewSet):
     serializer_class = HouseholdSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in (
+            "update",
+            "partial_update",
+            "destroy",
+        ):
+            return [
+                IsAuthenticated(),
+                IsHouseholdOwner(),
+            ]
+
+        return [
+            IsAuthenticated(),
+        ]
 
     def get_queryset(self):
         return Household.objects.filter(
