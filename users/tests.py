@@ -1207,4 +1207,1182 @@ class UserProfileAPITest(APITestCase):
             Household.objects.filter(id=household.id).exists()
         )
 
-# Create your tests here.
+    def test_owner_can_list_household_members(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя в Household
+        # с ролью OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём второго пользователя с ролью ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Создаём третьего пользователя с ролью CHILD.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в тот же Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Добавляем CHILD в тот же Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # OWNER запрашивает список участников Household.
+        response = self.client.get(
+            f"/api/v1/auth/households/{household.id}/members/"
+        )
+
+        # Проверяем, что запрос выполнен успешно.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Проверяем, что API вернуло общее количество
+        # участников Household.
+        self.assertEqual(
+            response.data["count"],
+            3,
+        )
+
+        # Получаем список участников из поля results,
+        # которое содержит данные текущей страницы.
+        members = response.data["results"]
+
+        # Проверяем, что на текущей странице находятся
+        # все три участника Household.
+        self.assertEqual(
+            len(members),
+            3,
+        )
+
+        # Получаем usernames всех участников,
+        # которые вернул API.
+        usernames = {
+            member["username"]
+            for member in members
+        }
+
+        # Проверяем, что API вернуло именно этих участников.
+        self.assertEqual(
+            usernames,
+            {
+                "testuser",
+                "adultuser",
+                "childuser",
+            },
+        )
+
+    def test_adult_can_list_household_members(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя в Household
+        # с ролью OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя с ролью ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Переключаем запрос на пользователя с ролью ADULT.
+        self.client.force_authenticate(
+            user=adult_user
+        )
+
+        # ADULT запрашивает список участников Household.
+        response = self.client.get(
+            f"/api/v1/auth/households/{household.id}/members/"
+        )
+
+        # Проверяем, что ADULT может просматривать участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Проверяем, что API вернуло общее количество
+        # участников Household.
+        self.assertEqual(
+            response.data["count"],
+            2,
+        )
+
+        # Получаем участников из текущей страницы.
+        members = response.data["results"]
+
+        # Проверяем, что текущая страница содержит
+        # OWNER и ADULT.
+        self.assertEqual(
+            len(members),
+            2,
+        )
+
+    def test_non_member_cannot_list_household_members(self):
+        # Создаём Household.
+        household = Household.objects.create(
+            name="Another Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя в Household
+        # с ролью OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя, который не состоит
+        # в данном Household.
+        another_user = User.objects.create_user(
+            username="anotheruser",
+            email="another@example.com",
+            password="testpass123",
+        )
+
+        # Переключаем запрос на пользователя,
+        # который не является участником Household.
+        self.client.force_authenticate(
+            user=another_user
+        )
+
+        # Не участник пытается получить список участников.
+        response = self.client.get(
+            f"/api/v1/auth/households/{household.id}/members/"
+        )
+
+        # Проверяем, что доступ запрещён.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_list_household_members_requires_authentication(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя в Household
+        # с ролью OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Убираем аутентификацию,
+        # чтобы выполнить запрос от имени анонимного пользователя.
+        self.client.force_authenticate(
+            user=None
+        )
+
+        # Неавторизованный пользователь пытается
+        # получить список участников Household.
+        response = self.client.get(
+            f"/api/v1/auth/households/{household.id}/members/"
+        )
+
+        # Проверяем, что API требует авторизацию.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_owner_can_add_adult_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя в Household
+        # с ролью OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя, которого OWNER будет добавлять.
+        new_user = User.objects.create_user(
+            username="newadult",
+            email="newadult@example.com",
+            password="testpass123",
+        )
+
+        # OWNER добавляет нового пользователя с ролью ADULT.
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # Проверяем успешное создание участника.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        # Проверяем, что membership действительно создана.
+        membership = HouseholdMembership.objects.get(
+            household=household,
+            user=new_user,
+        )
+
+        # Проверяем правильную роль нового участника.
+        self.assertEqual(
+            membership.role,
+            HouseholdMembership.Role.ADULT,
+        )
+
+        # Проверяем, что API вернул правильного пользователя.
+        self.assertEqual(
+            response.data["user"],
+            new_user.id,
+        )
+
+        # Проверяем username нового участника в ответе API.
+        self.assertEqual(
+            response.data["username"],
+            "newadult",
+        )
+
+    def test_owner_can_add_child_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя с ролью OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя, которого будем добавлять.
+        new_user = User.objects.create_user(
+            username="newchild",
+            email="newchild@example.com",
+            password="testpass123",
+        )
+
+        # OWNER добавляет пользователя с ролью CHILD.
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.CHILD,
+            },
+            format="json",
+        )
+
+        # Проверяем успешное создание участника.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        # Получаем созданную membership из базы.
+        membership = HouseholdMembership.objects.get(
+            household=household,
+            user=new_user,
+        )
+
+        # Проверяем правильную роль.
+        self.assertEqual(
+            membership.role,
+            HouseholdMembership.Role.CHILD,
+        )
+
+    def test_adult_cannot_add_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя с ролью ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Создаём пользователя, которого ADULT попытается добавить.
+        new_user = User.objects.create_user(
+            username="newmember",
+            email="newmember@example.com",
+            password="testpass123",
+        )
+
+        # Переключаем запрос на ADULT.
+        self.client.force_authenticate(
+            user=adult_user,
+        )
+
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # ADULT не имеет права добавлять участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_child_cannot_add_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя с ролью CHILD.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # Создаём пользователя, которого CHILD попытается добавить.
+        new_user = User.objects.create_user(
+            username="newmember",
+            email="newmember@example.com",
+            password="testpass123",
+        )
+
+        # Переключаем запрос на CHILD.
+        self.client.force_authenticate(
+            user=child_user,
+        )
+
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # CHILD не имеет права добавлять участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_non_member_cannot_add_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя, который не является
+        # участником этого Household.
+        outsider = User.objects.create_user(
+            username="outsider",
+            email="outsider@example.com",
+            password="testpass123",
+        )
+
+        # Создаём пользователя, которого outsider
+        # попытается добавить.
+        new_user = User.objects.create_user(
+            username="newmember",
+            email="newmember@example.com",
+            password="testpass123",
+        )
+
+        # Переключаем запрос на пользователя,
+        # который не является участником Household.
+        self.client.force_authenticate(
+            user=outsider,
+        )
+
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # Неучастник не может добавлять участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_unauthenticated_cannot_add_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём пользователя, которого можно было бы добавить.
+        new_user = User.objects.create_user(
+            username="newmember",
+            email="newmember@example.com",
+            password="testpass123",
+        )
+
+        # Убираем аутентификацию.
+        self.client.force_authenticate(user=None)
+
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # Неавторизованный пользователь получает 401.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_owner_cannot_add_existing_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # OWNER пытается повторно добавить того же пользователя.
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": adult_user.id,
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # Повторное добавление запрещено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем, что ошибка относится к полю user.
+        self.assertIn(
+            "user",
+            response.data,
+        )
+
+    def test_owner_cannot_add_another_owner(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как единственного OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём нового пользователя.
+        new_user = User.objects.create_user(
+            username="secondowner",
+            email="secondowner@example.com",
+            password="testpass123",
+        )
+
+        # OWNER пытается добавить второго OWNER.
+        response = self.client.post(
+            f"/api/v1/auth/households/{household.id}/members/",
+            {
+                "user": new_user.id,
+                "role": HouseholdMembership.Role.OWNER,
+            },
+            format="json",
+        )
+
+        # Второго OWNER нельзя создать через обычное добавление.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем, что ошибка относится к полю role.
+        self.assertIn(
+            "role",
+            response.data,
+        )
+
+    def test_owner_can_change_adult_to_child(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # OWNER изменяет роль ADULT на CHILD.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.CHILD,
+            },
+            format="json",
+        )
+
+        # Изменение роли должно быть успешным.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Проверяем, что роль действительно изменилась в базе данных.
+        adult_membership.refresh_from_db()
+
+        self.assertEqual(
+            adult_membership.role,
+            HouseholdMembership.Role.CHILD,
+        )
+
+        # Проверяем роль в ответе API.
+        self.assertEqual(
+            response.data["role"],
+            HouseholdMembership.Role.CHILD,
+        )
+
+    def test_owner_can_change_child_to_adult(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём CHILD.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем CHILD в Household.
+        child_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # OWNER изменяет роль CHILD на ADULT.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{child_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # Изменение роли должно быть успешным.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Проверяем, что роль действительно изменилась в базе данных.
+        child_membership.refresh_from_db()
+
+        self.assertEqual(
+            child_membership.role,
+            HouseholdMembership.Role.ADULT,
+        )
+
+        # Проверяем роль в ответе API.
+        self.assertEqual(
+            response.data["role"],
+            HouseholdMembership.Role.ADULT,
+        )
+
+    def test_owner_cannot_change_own_role(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        owner_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # OWNER пытается изменить собственную роль на ADULT.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{owner_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # Изменение собственной роли запрещено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем, что ошибка относится к полю role.
+        self.assertIn(
+            "role",
+            response.data,
+        )
+
+        # Проверяем, что роль OWNER не изменилась в базе данных.
+        owner_membership.refresh_from_db()
+
+        self.assertEqual(
+            owner_membership.role,
+            HouseholdMembership.Role.OWNER,
+        )
+
+    def test_owner_cannot_assign_another_owner(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём обычного участника.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем пользователя как ADULT.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # OWNER пытается назначить ADULT вторым OWNER.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.OWNER,
+            },
+            format="json",
+        )
+
+        # Назначение второго OWNER запрещено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем, что ошибка относится к полю role.
+        self.assertIn(
+            "role",
+            response.data,
+        )
+
+        # Проверяем, что исходная роль участника
+        # не изменилась в базе данных.
+        adult_membership.refresh_from_db()
+
+        self.assertEqual(
+            adult_membership.role,
+            HouseholdMembership.Role.ADULT,
+        )
+
+    def test_adult_cannot_change_member_role(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT, который будет выполнять PATCH.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Создаём CHILD, роль которого ADULT попытается изменить.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем CHILD в Household.
+        child_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # Переключаем авторизацию на ADULT.
+        self.client.force_authenticate(
+            user=adult_user,
+        )
+
+        # ADULT пытается изменить роль CHILD.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{child_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.ADULT,
+            },
+            format="json",
+        )
+
+        # ADULT не имеет права изменять роли участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что роль CHILD не изменилась.
+        child_membership.refresh_from_db()
+
+        self.assertEqual(
+            child_membership.role,
+            HouseholdMembership.Role.CHILD,
+        )
+
+    def test_child_cannot_change_member_role(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём CHILD, который будет выполнять PATCH.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем CHILD в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # Создаём ADULT, роль которого CHILD попытается изменить.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Переключаем авторизацию на CHILD.
+        self.client.force_authenticate(
+            user=child_user,
+        )
+
+        # CHILD пытается изменить роль ADULT.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.CHILD,
+            },
+            format="json",
+        )
+
+        # CHILD не имеет права изменять роли участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что роль ADULT не изменилась.
+        adult_membership.refresh_from_db()
+
+        self.assertEqual(
+            adult_membership.role,
+            HouseholdMembership.Role.ADULT,
+        )
+
+    def test_non_member_cannot_change_member_role(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT, роль которого будет изменяться.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Создаём пользователя, который НЕ является
+        # участником этого Household.
+        outsider = User.objects.create_user(
+            username="outsider",
+            email="outsider@example.com",
+            password="testpass123",
+        )
+
+        # Переключаем авторизацию на неучастника.
+        self.client.force_authenticate(
+            user=outsider,
+        )
+
+        # Неучастник пытается изменить роль ADULT.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.CHILD,
+            },
+            format="json",
+        )
+
+        # Неучастник не имеет права изменять роли участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что роль ADULT не изменилась.
+        adult_membership.refresh_from_db()
+
+        self.assertEqual(
+            adult_membership.role,
+            HouseholdMembership.Role.ADULT,
+        )
+
+    def test_unauthenticated_cannot_change_member_role(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT, роль которого будем изменять.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Убираем аутентификацию.
+        self.client.force_authenticate(user=None)
+
+        # Неавторизованный пользователь пытается изменить роль ADULT.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+            {
+                "role": HouseholdMembership.Role.CHILD,
+            },
+            format="json",
+        )
+
+        # Неавторизованный пользователь получает 401.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+        # Проверяем, что роль ADULT не изменилась.
+        adult_membership.refresh_from_db()
+
+        self.assertEqual(
+            adult_membership.role,
+            HouseholdMembership.Role.ADULT,
+        )
+
+    def test_owner_cannot_change_member_user(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Создаём другого пользователя.
+        another_user = User.objects.create_user(
+            username="anotheruser",
+            email="another@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # OWNER пытается изменить не только роль,
+        # но и пользователя, связанного с membership.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+            {
+                "user": another_user.id,
+                "role": HouseholdMembership.Role.CHILD,
+            },
+            format="json",
+        )
+
+        # Передача поля user должна быть запрещена.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем, что ошибка относится к полю user.
+        self.assertIn(
+            "user",
+            response.data,
+        )
+
+        # Проверяем, что пользователь membership не изменился.
+        adult_membership.refresh_from_db()
+
+        self.assertEqual(
+            adult_membership.user,
+            adult_user,
+        )
+
+        # Проверяем, что роль тоже не изменилась.
+        self.assertEqual(
+            adult_membership.role,
+            HouseholdMembership.Role.ADULT,
+        )

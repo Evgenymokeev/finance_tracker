@@ -3,6 +3,7 @@ from rest_framework import serializers
 from django.db import transaction
 from .models import (
     Household,
+    HouseholdMembership,
     NotificationSettings,
     UserProfile,
     UserSettings,
@@ -126,3 +127,159 @@ class HouseholdSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+class HouseholdMemberSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(
+        source="user.username",
+        read_only=True,
+    )
+
+    class Meta:
+        model = HouseholdMembership
+        fields = (
+            "id",
+            "user",
+            "username",
+            "role",
+        )
+
+        read_only_fields = (
+            "id",
+            "user",
+            "username",
+            "role",
+        )
+
+class HouseholdMemberSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(
+        source="user.username",
+        read_only=True,
+    )
+
+    class Meta:
+        model = HouseholdMembership
+        fields = (
+            "id",
+            "user",
+            "username",
+            "role",
+        )
+
+        read_only_fields = (
+            "id",
+            "user",
+            "username",
+            "role",
+        )
+
+class AddHouseholdMemberSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HouseholdMembership
+        fields = (
+            "user",
+            "role",
+        )
+
+    def validate_role(self, value):
+        # Пользователь не может добавить нового OWNER
+        # через обычное добавление участника.
+        #
+        # В Household должен оставаться только один OWNER,
+        # который автоматически создаётся при создании Household.
+        if value == HouseholdMembership.Role.OWNER:
+            raise serializers.ValidationError(
+                "A new household member cannot have the owner role."
+            )
+
+        return value
+
+    def validate(self, attrs):
+        household = self.context["household"]
+        user = attrs["user"]
+
+        # Проверяем, не является ли пользователь уже
+        # участником этого Household.
+        #
+        # Благодаря этому мы заранее возвращаем понятную
+        # ошибку вместо ошибки уникального ограничения базы данных.
+        if HouseholdMembership.objects.filter(
+            household=household,
+            user=user,
+        ).exists():
+            raise serializers.ValidationError(
+                {
+                    "user": (
+                        "This user is already a member "
+                        "of this household."
+                    )
+                }
+            )
+
+        return attrs
+
+
+class UpdateHouseholdMemberSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HouseholdMembership
+        fields = (
+            "role",
+        )
+
+    def validate(self, attrs):
+        # Получаем исходные данные запроса.
+        request_data = self.initial_data
+
+        # Разрешаем изменять только поле role.
+        allowed_fields = {"role"}
+
+        # Находим поля, которые клиент попытался передать,
+        # но которые не разрешены для изменения.
+        unexpected_fields = set(request_data.keys()) - allowed_fields
+
+        if unexpected_fields:
+            raise serializers.ValidationError(
+                {
+                    field: "This field cannot be changed."
+                    for field in unexpected_fields
+                }
+            )
+
+        # Получаем текущий membership.
+        membership = self.instance
+
+        # Получаем пользователя, который выполняет запрос.
+        request = self.context["request"]
+
+        # Нельзя изменять собственную роль владельца.
+        #
+        # Иначе OWNER сможет убрать у себя
+        # права владельца, что нарушит правила Household.
+        if (
+            membership.user == request.user
+            and membership.role == HouseholdMembership.Role.OWNER
+        ):
+            raise serializers.ValidationError(
+                {
+                    "role": (
+                        "The household owner cannot change "
+                        "their own role."
+                    )
+                }
+            )
+
+        return attrs
+
+    def validate_role(self, value):
+        # Нельзя назначить участнику роль OWNER.
+        #
+        # В нашем приложении OWNER создаётся автоматически
+        # при создании Household.
+        #
+        # Через PATCH разрешаем менять только роли
+        # ADULT и CHILD.
+        if value == HouseholdMembership.Role.OWNER:
+            raise serializers.ValidationError(
+                "A household member cannot be assigned the owner role."
+            )
+
+        return value
