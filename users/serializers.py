@@ -149,29 +149,6 @@ class HouseholdMemberSerializer(serializers.ModelSerializer):
             "username",
             "role",
         )
-
-class HouseholdMemberSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(
-        source="user.username",
-        read_only=True,
-    )
-
-    class Meta:
-        model = HouseholdMembership
-        fields = (
-            "id",
-            "user",
-            "username",
-            "role",
-        )
-
-        read_only_fields = (
-            "id",
-            "user",
-            "username",
-            "role",
-        )
-
 class AddHouseholdMemberSerializer(serializers.ModelSerializer):
     class Meta:
         model = HouseholdMembership

@@ -72,7 +72,7 @@ urlpatterns = [
         name="household-members",
     ),
 
-    # Изменяем роль участника Household.
+    # Изменяем роль или удаляем участника Household.
     path(
         "households/<int:household_id>/members/<int:member_id>/",
         HouseholdMemberDetailView.as_view(),
