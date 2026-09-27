@@ -287,16 +287,16 @@ class HouseholdMembersView(generics.ListCreateAPIView):
 
 
 @extend_schema(tags=["Household"])
-class HouseholdMemberDetailView(generics.UpdateAPIView):
+class HouseholdMemberDetailView(generics.GenericAPIView):
     serializer_class = UpdateHouseholdMemberSerializer
     permission_classes = [IsAuthenticated]
-    http_method_names = ["patch"]
+    http_method_names = ["patch", "delete"]
 
     def get_queryset(self):
         # Ограничиваем QuerySet участниками Household,
         # указанного в URL.
         #
-        # Благодаря этому нельзя изменить участника
+        # Благодаря этому нельзя изменить или удалить участника
         # из другого Household через подстановку ID.
         return HouseholdMembership.objects.filter(
             household_id=self.kwargs["household_id"]
@@ -320,22 +320,22 @@ class HouseholdMemberDetailView(generics.UpdateAPIView):
             role=HouseholdMembership.Role.OWNER,
         ).exists()
 
-        # Только OWNER может изменять роли участников.
+        # Только OWNER может изменять или удалять участников.
         if not is_owner:
             raise PermissionDenied(
-                "Only the household owner can update members."
+                "Only the household owner can manage members."
             )
 
-        # Получаем участника из ограниченного QuerySet.
+        # Получаем участника только из текущего Household.
         #
-        # Если участник не принадлежит этому Household,
-        # будет возвращён ответ 404.
+        # Если member_id принадлежит другому Household,
+        # объект не будет найден и вернётся 404.
         return get_object_or_404(
             self.get_queryset(),
             pk=self.kwargs["member_id"],
         )
 
-    def update(self, request, *args, **kwargs):
+    def patch(self, request, *args, **kwargs):
         # Получаем участника с проверкой прав OWNER.
         instance = self.get_object()
 
@@ -350,7 +350,7 @@ class HouseholdMemberDetailView(generics.UpdateAPIView):
         serializer.is_valid(raise_exception=True)
 
         # Сохраняем новую роль.
-        self.perform_update(serializer)
+        serializer.save()
 
         # Возвращаем обновлённые данные участника.
         response_serializer = HouseholdMemberSerializer(
@@ -361,4 +361,28 @@ class HouseholdMemberDetailView(generics.UpdateAPIView):
         return Response(
             response_serializer.data,
             status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, *args, **kwargs):
+        # Получаем участника с проверкой прав OWNER.
+        instance = self.get_object()
+
+        # OWNER не может удалить самого себя.
+        if instance.user_id == request.user.id:
+            raise PermissionDenied(
+                "The household owner cannot remove themselves."
+            )
+
+        # OWNER не может удалить другого OWNER.
+        if instance.role == HouseholdMembership.Role.OWNER:
+            raise PermissionDenied(
+                "The household owner cannot remove another owner."
+            )
+
+        # Удаляем membership.
+        instance.delete()
+
+        # DELETE успешно выполнен.
+        return Response(
+            status=status.HTTP_204_NO_CONTENT,
         )

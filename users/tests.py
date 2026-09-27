@@ -2386,3 +2386,476 @@ class UserProfileAPITest(APITestCase):
             adult_membership.role,
             HouseholdMembership.Role.ADULT,
         )
+
+    def test_owner_can_delete_adult_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # OWNER удаляет ADULT.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+        )
+
+        # Удаление успешно выполнено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+
+        # Проверяем, что membership действительно удалён.
+        self.assertFalse(
+            HouseholdMembership.objects.filter(
+                id=adult_membership.id,
+            ).exists()
+        )
+
+    def test_owner_can_delete_child_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём CHILD.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем CHILD в Household.
+        child_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # OWNER удаляет CHILD.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{child_membership.id}/",
+        )
+
+        # Удаление успешно выполнено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+
+        # Проверяем, что membership действительно удалён.
+        self.assertFalse(
+            HouseholdMembership.objects.filter(
+                id=child_membership.id,
+            ).exists()
+        )
+
+    def test_owner_cannot_delete_themselves(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        owner_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # OWNER пытается удалить самого себя.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{owner_membership.id}/",
+        )
+
+        # Удаление самого себя запрещено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что OWNER остался в Household.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=owner_membership.id,
+            ).exists()
+        )
+
+    def test_owner_cannot_delete_another_owner(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём другого OWNER.
+        another_owner = User.objects.create_user(
+            username="anotherowner",
+            email="anotherowner@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем другого OWNER в Household.
+        another_owner_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=another_owner,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # OWNER пытается удалить другого OWNER.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{another_owner_membership.id}/",
+        )
+
+        # Удаление другого OWNER запрещено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что другой OWNER остался в Household.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=another_owner_membership.id,
+            ).exists()
+        )
+
+    def test_adult_cannot_delete_member(self):
+        # Создаём Household.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Создаём OWNER.
+        owner_user = User.objects.create_user(
+            username="owneruser",
+            email="owner@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем OWNER в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=owner_user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем ADULT в Household.
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Создаём CHILD, которого ADULT попытается удалить.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        child_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # Авторизуемся как ADULT.
+        self.client.force_authenticate(user=adult_user)
+
+        # ADULT пытается удалить CHILD.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{child_membership.id}/",
+        )
+
+        # ADULT не имеет права удалять участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что CHILD остался в Household.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=child_membership.id,
+            ).exists()
+        )
+
+    def test_child_cannot_delete_member(self):
+        # Создаём Household.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Создаём OWNER.
+        owner_user = User.objects.create_user(
+            username="owneruser",
+            email="owner@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем OWNER в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=owner_user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём CHILD.
+        child_user = User.objects.create_user(
+            username="childuser",
+            email="child@example.com",
+            password="testpass123",
+        )
+
+        # Добавляем CHILD в Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=child_user,
+            role=HouseholdMembership.Role.CHILD,
+        )
+
+        # Создаём ADULT, которого CHILD попытается удалить.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Авторизуемся как CHILD.
+        self.client.force_authenticate(user=child_user)
+
+        # CHILD пытается удалить ADULT.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+        )
+
+        # CHILD не имеет права удалять участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что ADULT остался в Household.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=adult_membership.id,
+            ).exists()
+        )
+
+    def test_non_member_cannot_delete_household_member(self):
+        # Создаём Household.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Создаём пользователя, который не состоит в Household.
+        outsider = User.objects.create_user(
+            username="outsider",
+            email="outsider@example.com",
+            password="testpass123",
+        )
+
+        # Авторизуемся как пользователь вне Household.
+        self.client.force_authenticate(user=outsider)
+
+        # Outsider пытается удалить ADULT.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+        )
+
+        # Пользователь вне Household не имеет права удалять участников.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Проверяем, что ADULT остался.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=adult_membership.id,
+            ).exists()
+        )
+
+    def test_unauthenticated_cannot_delete_member(self):
+        # Создаём Household текущего пользователя.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём ADULT.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        adult_membership = HouseholdMembership.objects.create(
+            household=household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # Убираем аутентификацию.
+        self.client.force_authenticate(user=None)
+
+        # Неавторизованный пользователь пытается удалить ADULT.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{adult_membership.id}/",
+        )
+
+        # Неавторизованный пользователь получает 401.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+        # Проверяем, что ADULT не был удалён.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=adult_membership.id,
+            ).exists()
+        )
+
+    def test_owner_cannot_delete_member_from_another_household(self):
+        # Создаём первый Household.
+        household = Household.objects.create(
+            name="My Family",
+            created_by=self.user,
+        )
+
+        # Добавляем текущего пользователя как OWNER первого Household.
+        HouseholdMembership.objects.create(
+            household=household,
+            user=self.user,
+            role=HouseholdMembership.Role.OWNER,
+        )
+
+        # Создаём второй Household.
+        another_household = Household.objects.create(
+            name="Another Family",
+            created_by=self.user,
+        )
+
+        # Создаём участника второго Household.
+        adult_user = User.objects.create_user(
+            username="adultuser",
+            email="adult@example.com",
+            password="testpass123",
+        )
+
+        another_membership = HouseholdMembership.objects.create(
+            household=another_household,
+            user=adult_user,
+            role=HouseholdMembership.Role.ADULT,
+        )
+
+        # OWNER первого Household пытается удалить
+        # участника второго Household.
+        response = self.client.delete(
+            f"/api/v1/auth/households/{household.id}/members/"
+            f"{another_membership.id}/",
+        )
+
+        # Участник не найден внутри первого Household,
+        # поэтому возвращается 404.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+        # Проверяем, что участник второго Household не удалён.
+        self.assertTrue(
+            HouseholdMembership.objects.filter(
+                id=another_membership.id,
+            ).exists()
+        )
