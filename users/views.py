@@ -1,15 +1,31 @@
-from django.contrib.auth import update_session_auth_hash
+from django.conf import settings
+from django.contrib.auth import get_user_model, update_session_auth_hash
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
+from drf_spectacular.utils import extend_schema
+
+from rest_framework import generics, status, viewsets
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied
+
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
 
-from drf_spectacular.utils import extend_schema
+from .models import (
+    Household,
+    HouseholdMembership,
+    NotificationSettings,
+    UserSettings,
+)
+
+from .permissions import IsHouseholdOwner
 
 from .serializers import (
     RegisterSerializer,
@@ -21,15 +37,12 @@ from .serializers import (
     HouseholdMemberSerializer,
     AddHouseholdMemberSerializer,
     UpdateHouseholdMemberSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer,
 )
-from .models import (
-    Household,
-    HouseholdMembership,
-    NotificationSettings,
-    UserSettings,
-)
-from .permissions import IsHouseholdOwner
-from rest_framework import generics, status, viewsets
+
+
+User = get_user_model()
 
 
 @extend_schema(tags=["Auth"])
@@ -47,6 +60,160 @@ class LoginView(TokenObtainPairView):
 class RefreshView(TokenRefreshView):
     permission_classes = [AllowAny]
 
+@extend_schema(tags=["Auth"])
+class PasswordResetRequestView(generics.GenericAPIView):
+    serializer_class = PasswordResetRequestSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        user = User.objects.filter(
+            email__iexact=email,
+            is_active=True,
+        ).first()
+
+        if user:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+
+            reset_url = (
+                "http://localhost:8000/api/v1/auth/"
+                f"password-reset-confirm/?uid={uid}&token={token}"
+            )
+
+            send_mail(
+                subject="Password reset",
+                message=(
+                    "You requested a password reset.\n\n"
+                    "Use the following link to reset your password:\n\n"
+                    f"{reset_url}\n\n"
+                    "If you did not request this, you can ignore this email."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+
+        return Response(
+            {
+                "detail": (
+                    "If an account with this email exists, "
+                    "a password reset link has been sent."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
+
+@extend_schema(tags=["Auth"])
+class PasswordResetConfirmView(generics.GenericAPIView):
+    serializer_class = PasswordResetConfirmSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        # Получаем uid и token напрямую из запроса.
+        #
+        # Пока мы не запускаем полную валидацию serializer,
+        # потому что сначала должны определить пользователя.
+        uid = request.data.get("uid")
+        token = request.data.get("token")
+
+        # Проверяем, что uid и token вообще переданы.
+        #
+        # Если одного из них нет, ссылка для восстановления
+        # считается недействительной.
+        if not uid or not token:
+            return Response(
+                {
+                    "detail": "Invalid password reset link."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Декодируем uid, который Django создал
+            # при отправке письма.
+            user_id = force_str(
+                urlsafe_base64_decode(uid)
+            )
+
+            # Находим активного пользователя.
+            user = User.objects.get(
+                pk=user_id,
+                is_active=True,
+            )
+
+        except (
+            TypeError,
+            ValueError,
+            OverflowError,
+            User.DoesNotExist,
+        ):
+            # Если uid повреждён или пользователь
+            # с таким ID не существует,
+            # ссылка считается недействительной.
+            return Response(
+                {
+                    "detail": "Invalid password reset link."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Проверяем токен, созданный Django.
+        #
+        # Здесь Django проверяет, что токен:
+        # - принадлежит этому пользователю;
+        # - не просрочен;
+        # - не был сделан недействительным
+        #   изменением состояния пользователя.
+        if not default_token_generator.check_token(
+            user,
+            token,
+        ):
+            return Response(
+                {
+                    "detail": "Invalid password reset link."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Теперь пользователь известен и token подтверждён.
+        #
+        # Передаём user в context serializer.
+        # Это необходимо для UserAttributeSimilarityValidator,
+        # который может проверить новый пароль
+        # на сходство с данными пользователя.
+        serializer = self.get_serializer(
+            data=request.data,
+            context={
+                "request": request,
+                "user": user,
+            },
+        )
+
+        # Проверяем новый пароль всеми стандартными
+        # Django password validators.
+        serializer.is_valid(raise_exception=True)
+
+        # Получаем уже проверенный новый пароль.
+        new_password = serializer.validated_data["new_password"]
+
+        # set_password() правильно хеширует пароль
+        # перед сохранением в базе данных.
+        user.set_password(new_password)
+
+        # Сохраняем изменённый пароль.
+        user.save()
+
+        return Response(
+            {
+                "detail": "Password has been reset successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
 
 @extend_schema(tags=["Profile"])
 class ProfileView(generics.RetrieveUpdateAPIView):

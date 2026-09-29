@@ -1,4 +1,6 @@
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from rest_framework import serializers
 from django.db import transaction
 from .models import (
@@ -23,6 +25,10 @@ class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ("username", "email", "password")
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -87,6 +93,16 @@ class UserSettingsSerializer(serializers.ModelSerializer):
             "timezone",
         )
 
+    def validate_timezone(self, value):
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError:
+            raise serializers.ValidationError(
+                "Invalid timezone."
+            )
+
+        return value
+
 
 class NotificationSettingsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -108,6 +124,13 @@ class ChangePasswordSerializer(serializers.Serializer):
         write_only=True,
         min_length=8,
     )
+
+    def validate_new_password(self, value):
+        validate_password(
+            value,
+            user=self.context["request"].user,
+        )
+        return value
 
 
 class HouseholdSerializer(serializers.ModelSerializer):
@@ -258,5 +281,40 @@ class UpdateHouseholdMemberSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "A household member cannot be assigned the owner role."
             )
+
+        return value
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    # UID пользователя передаётся вместе со ссылкой
+    # для восстановления пароля.
+    uid = serializers.CharField()
+
+    # Одноразовый токен, который Django создал
+    # во время запроса на восстановление пароля.
+    token = serializers.CharField()
+
+    # Новый пароль пользователя.
+    # write_only означает, что пароль никогда
+    # не будет возвращён в API-ответе.
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+    )
+
+    def validate_new_password(self, value):
+        # Используем стандартные Django password validators.
+        #
+        # Поэтому здесь автоматически работают:
+        # - MinimumLengthValidator
+        # - CommonPasswordValidator
+        # - NumericPasswordValidator
+        # - UserAttributeSimilarityValidator
+        validate_password(
+            value,
+            user=self.context.get("user"),
+        )
 
         return value

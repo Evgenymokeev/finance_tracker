@@ -165,6 +165,11 @@ class HouseholdMembership(models.Model):
                 fields=["household", "user"],
                 name="unique_household_user_membership",
             ),
+            models.UniqueConstraint(
+                fields=["household"],
+                condition=models.Q(role="owner"),
+                name="unique_household_owner",
+            ),
         ]
 
     def __str__(self):

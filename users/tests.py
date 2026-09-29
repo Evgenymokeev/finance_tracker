@@ -1,7 +1,11 @@
 from django.contrib.auth.models import User
-
+from unittest.mock import patch
+from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.test import APITestCase
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 
 from .models import (
     Household,
@@ -301,6 +305,102 @@ class UserProfileAPITest(APITestCase):
             status.HTTP_400_BAD_REQUEST
         )
 
+    def test_register_with_common_password(self):
+        self.client.force_authenticate(
+            user=None
+        )
+
+        data = {
+            "username": "commonuser",
+            "email": "common@example.com",
+            "password": "password"
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.assertIn(
+            "password",
+            response.data
+        )
+
+    def test_register_with_numeric_password(self):
+        self.client.force_authenticate(
+            user=None
+        )
+
+        data = {
+            "username": "numericuser",
+            "email": "numeric@example.com",
+            "password": "123456789"
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            data
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.assertIn(
+            "password",
+            response.data
+        )
+
+    def test_change_password_with_common_password(self):
+        data = {
+            "old_password": "testpass123",
+            "new_password": "password"
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/change-password/",
+            data
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.assertIn(
+            "new_password",
+            response.data
+        )
+
+    def test_change_password_with_numeric_password(self):
+        data = {
+            "old_password": "testpass123",
+            "new_password": "123456789"
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/change-password/",
+            data
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.assertIn(
+            "new_password",
+            response.data
+        )
+
+
+
     def test_register_with_existing_email(self):
         self.client.force_authenticate(
             user=None
@@ -402,6 +502,53 @@ class UserProfileAPITest(APITestCase):
         self.assertEqual(
             user_settings.timezone,
             "Europe/Prague"
+        )
+
+    def test_update_user_settings_with_valid_timezone(self):
+        data = {
+            "timezone": "Europe/Prague"
+        }
+
+        response = self.client.patch(
+            "/api/v1/auth/settings/",
+            data
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK
+        )
+
+        self.assertEqual(
+            response.data["timezone"],
+            "Europe/Prague"
+        )
+
+        self.user.settings.refresh_from_db()
+
+        self.assertEqual(
+            self.user.settings.timezone,
+            "Europe/Prague"
+        )
+
+    def test_update_user_settings_with_invalid_timezone(self):
+        data = {
+            "timezone": "Invalid/Timezone"
+        }
+
+        response = self.client.patch(
+            "/api/v1/auth/settings/",
+            data
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.assertIn(
+            "timezone",
+            response.data
         )
 
     def test_update_user_settings_with_invalid_currency(self):
@@ -2514,7 +2661,7 @@ class UserProfileAPITest(APITestCase):
             ).exists()
         )
 
-    def test_owner_cannot_delete_another_owner(self):
+    def test_household_cannot_have_two_owners(self):
         # Создаём Household текущего пользователя.
         household = Household.objects.create(
             name="My Family",
@@ -2528,37 +2675,30 @@ class UserProfileAPITest(APITestCase):
             role=HouseholdMembership.Role.OWNER,
         )
 
-        # Создаём другого OWNER.
+        # Создаём другого пользователя.
         another_owner = User.objects.create_user(
             username="anotherowner",
             email="anotherowner@example.com",
             password="testpass123",
         )
 
-        # Добавляем другого OWNER в Household.
-        another_owner_membership = HouseholdMembership.objects.create(
-            household=household,
-            user=another_owner,
-            role=HouseholdMembership.Role.OWNER,
-        )
+        # Попытка создать второго OWNER должна быть запрещена
+        # ограничением unique_household_owner на уровне БД.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                HouseholdMembership.objects.create(
+                    household=household,
+                    user=another_owner,
+                    role=HouseholdMembership.Role.OWNER,
+                )
 
-        # OWNER пытается удалить другого OWNER.
-        response = self.client.delete(
-            f"/api/v1/auth/households/{household.id}/members/"
-            f"{another_owner_membership.id}/",
-        )
-
-        # Удаление другого OWNER запрещено.
+        # Проверяем, что OWNER в Household по-прежнему только один.
         self.assertEqual(
-            response.status_code,
-            status.HTTP_403_FORBIDDEN,
-        )
-
-        # Проверяем, что другой OWNER остался в Household.
-        self.assertTrue(
             HouseholdMembership.objects.filter(
-                id=another_owner_membership.id,
-            ).exists()
+                household=household,
+                role=HouseholdMembership.Role.OWNER,
+            ).count(),
+            1,
         )
 
     def test_adult_cannot_delete_member(self):
@@ -2858,4 +2998,403 @@ class UserProfileAPITest(APITestCase):
             HouseholdMembership.objects.filter(
                 id=another_membership.id,
             ).exists()
+        )
+
+    @patch("users.views.send_mail")
+    def test_password_reset_request_existing_email(self, mock_send_mail):
+        # Отключаем авторизацию.
+        # Password Reset должен быть доступен пользователю,
+        # который не может войти в аккаунт.
+        self.client.force_authenticate(user=None)
+
+        # Отправляем запрос на восстановление пароля
+        # для существующего пользователя.
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": "test@example.com"},
+        )
+
+        # Запрос должен успешно обработаться.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Проверяем текст ответа.
+        #
+        # Он специально одинаковый для существующего
+        # и несуществующего email.
+        # Это не позволяет определить,
+        # зарегистрирован ли такой пользователь.
+        self.assertEqual(
+            response.data["detail"],
+            (
+                "If an account with this email exists, "
+                "a password reset link has been sent."
+            ),
+        )
+
+        # Для существующего пользователя письмо
+        # действительно должно быть отправлено.
+        mock_send_mail.assert_called_once()
+
+        # Проверяем, что письмо отправляется
+        # именно на email пользователя.
+        self.assertEqual(
+            mock_send_mail.call_args.kwargs["recipient_list"],
+            ["test@example.com"],
+        )
+
+    @patch("users.views.send_mail")
+    def test_password_reset_request_unknown_email(self, mock_send_mail):
+        # Отключаем авторизацию.
+        # Восстановление пароля не требует JWT.
+        self.client.force_authenticate(user=None)
+
+        # Отправляем email, которого нет в базе данных.
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": "unknown@example.com"},
+        )
+
+        # API всё равно возвращает 200.
+        #
+        # Мы не должны сообщать клиенту:
+        # "Такого пользователя нет".
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Ответ должен быть таким же,
+        # как и для существующего пользователя.
+        self.assertEqual(
+            response.data["detail"],
+            (
+                "If an account with this email exists, "
+                "a password reset link has been sent."
+            ),
+        )
+
+        # Но письмо отправляться не должно,
+        # потому что такого пользователя нет.
+        mock_send_mail.assert_not_called()
+
+    @patch("users.views.send_mail")
+    def test_password_reset_request_invalid_email(self, mock_send_mail):
+        # Отключаем авторизацию.
+        self.client.force_authenticate(user=None)
+
+        # Передаём строку, которая не является корректным email.
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": "not-an-email"},
+        )
+
+        # Serializer должен отклонить неправильный формат email.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Письмо в этом случае отправляться не должно,
+        # потому что запрос не прошёл валидацию.
+        mock_send_mail.assert_not_called()
+
+    @patch("users.views.send_mail")
+    def test_password_reset_request_does_not_require_authentication(
+        self,
+        mock_send_mail,
+    ):
+        # Пользователь не авторизован.
+        self.client.force_authenticate(user=None)
+
+        # Но он всё равно может запросить восстановление пароля.
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": "test@example.com"},
+        )
+
+        # Запрос должен успешно обработаться.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_password_reset_confirm(self):
+        # Получаем UID пользователя в том же формате,
+        # который используется PasswordResetRequestView.
+        uid = urlsafe_base64_encode(
+            force_bytes(self.user.pk)
+        )
+
+        # Создаём настоящий Django password reset token
+        # для нашего пользователя.
+        #
+        # Используем именно default_token_generator,
+        # потому что его проверяет PasswordResetConfirmView.
+        token = default_token_generator.make_token(
+            self.user
+        )
+
+        # Запоминаем старый пароль.
+        old_password = "testpass123"
+
+        # Новый пароль должен соответствовать
+        # настроенным Django password validators.
+        new_password = "NewSecurePassword123!"
+
+        # Password Reset должен работать без авторизации.
+        self.client.force_authenticate(user=None)
+
+        # Отправляем uid, token и новый пароль
+        # на endpoint подтверждения сброса.
+        response = self.client.post(
+            "/api/v1/auth/password-reset-confirm/",
+            {
+                "uid": uid,
+                "token": token,
+                "new_password": new_password,
+            },
+        )
+
+        # Сброс пароля должен завершиться успешно.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Проверяем сообщение API.
+        self.assertEqual(
+            response.data["detail"],
+            "Password has been reset successfully.",
+        )
+
+        # Обновляем объект пользователя из базы данных,
+        # чтобы проверить именно сохранённый пароль.
+        self.user.refresh_from_db()
+
+        # Старый пароль больше не должен работать.
+        self.assertFalse(
+            self.user.check_password(old_password)
+        )
+
+        # Новый пароль должен работать.
+        self.assertTrue(
+            self.user.check_password(new_password)
+        )
+
+    def test_password_reset_confirm_invalid_token(self):
+        # Получаем корректный UID существующего пользователя.
+        uid = urlsafe_base64_encode(
+            force_bytes(self.user.pk)
+        )
+
+        # Используем заведомо неправильный token.
+        invalid_token = "invalid-token"
+
+        # Запоминаем текущий пароль,
+        # чтобы после запроса убедиться,
+        # что он не был изменён.
+        old_password = "testpass123"
+
+        # Password Reset должен быть доступен
+        # без авторизации.
+        self.client.force_authenticate(user=None)
+
+        # Отправляем запрос с неправильным token.
+        response = self.client.post(
+            "/api/v1/auth/password-reset-confirm/",
+            {
+                "uid": uid,
+                "token": invalid_token,
+                "new_password": "NewSecurePassword123!",
+            },
+        )
+
+        # Неправильный token должен привести к ошибке.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем сообщение об ошибочной ссылке.
+        self.assertEqual(
+            response.data["detail"],
+            "Invalid password reset link.",
+        )
+
+        # Обновляем пользователя из базы данных.
+        self.user.refresh_from_db()
+
+        # Проверяем, что старый пароль всё ещё работает.
+        self.assertTrue(
+            self.user.check_password(old_password)
+        )
+
+    def test_password_reset_confirm_invalid_uid(self):
+        # Используем строку, которая не является
+        # корректным UID пользователя.
+        invalid_uid = "invalid-uid"
+
+        # Создаём настоящий token не имеет смысла,
+        # потому что UID уже недействителен.
+        token = default_token_generator.make_token(
+            self.user
+        )
+
+        # Password Reset доступен без авторизации.
+        self.client.force_authenticate(user=None)
+
+        # Отправляем запрос с неправильным UID.
+        response = self.client.post(
+            "/api/v1/auth/password-reset-confirm/",
+            {
+                "uid": invalid_uid,
+                "token": token,
+                "new_password": "NewSecurePassword123!",
+            },
+        )
+
+        # Недействительный UID должен привести к ошибке.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем одинаковое безопасное сообщение.
+        self.assertEqual(
+            response.data["detail"],
+            "Invalid password reset link.",
+        )
+
+        # Убеждаемся, что пароль пользователя
+        # не был изменён.
+        self.user.refresh_from_db()
+
+        self.assertTrue(
+            self.user.check_password("testpass123")
+        )
+
+    def test_password_reset_confirm_weak_password(self):
+        # Получаем корректный UID пользователя.
+        uid = urlsafe_base64_encode(
+            force_bytes(self.user.pk)
+        )
+
+        # Создаём настоящий token.
+        token = default_token_generator.make_token(
+            self.user
+        )
+
+        # Password Reset доступен без авторизации.
+        self.client.force_authenticate(user=None)
+
+        # Передаём слишком простой пароль.
+        #
+        # "12345678" соответствует минимальной длине,
+        # но должен быть отклонён Django password validators.
+        response = self.client.post(
+            "/api/v1/auth/password-reset-confirm/",
+            {
+                "uid": uid,
+                "token": token,
+                "new_password": "12345678",
+            },
+        )
+
+        # Serializer должен отклонить пароль.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем, что ошибка относится именно
+        # к new_password.
+        self.assertIn(
+            "new_password",
+            response.data,
+        )
+
+        # Пароль пользователя не должен измениться.
+        self.user.refresh_from_db()
+
+        self.assertTrue(
+            self.user.check_password("testpass123")
+        )
+
+    def test_password_reset_confirm_token_cannot_be_reused(self):
+        # Получаем корректный UID пользователя.
+        uid = urlsafe_base64_encode(
+            force_bytes(self.user.pk)
+        )
+
+        # Создаём настоящий Django password reset token.
+        #
+        # Этот token должен быть действительным
+        # для первого запроса на смену пароля.
+        token = default_token_generator.make_token(
+            self.user
+        )
+
+        # Password Reset должен работать без авторизации.
+        self.client.force_authenticate(user=None)
+
+        # Первый запрос должен успешно изменить пароль.
+        response = self.client.post(
+            "/api/v1/auth/password-reset-confirm/",
+            {
+                "uid": uid,
+                "token": token,
+                "new_password": "NewSecurePassword123!",
+            },
+        )
+
+        # Первый сброс пароля должен завершиться успешно.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        # Обновляем пользователя из базы данных,
+        # чтобы изменения пароля были учтены
+        # при следующей проверке token.
+        self.user.refresh_from_db()
+
+        # Повторно используем тот же самый token.
+        #
+        # После изменения пароля Django должен
+        # автоматически считать старый token недействительным.
+        response = self.client.post(
+            "/api/v1/auth/password-reset-confirm/",
+            {
+                "uid": uid,
+                "token": token,
+                "new_password": "AnotherSecurePassword123!",
+            },
+        )
+
+        # Повторное использование token должно быть запрещено.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Проверяем безопасное общее сообщение.
+        self.assertEqual(
+            response.data["detail"],
+            "Invalid password reset link.",
+        )
+
+        # Проверяем, что второй пароль НЕ был установлен.
+        self.assertTrue(
+            self.user.check_password(
+                "NewSecurePassword123!"
+            )
+        )
+
+        self.assertFalse(
+            self.user.check_password(
+                "AnotherSecurePassword123!"
+            )
         )

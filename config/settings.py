@@ -171,3 +171,6 @@ CELERY_TASK_ALWAYS_EAGER = os.getenv(
 ) == "True"
 
 TESTING = os.getenv("TESTING", "False") == "True"
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = "webmaster@localhost"
