@@ -3398,3 +3398,170 @@ class UserProfileAPITest(APITestCase):
                 "AnotherSecurePassword123!"
             )
         )
+
+    def test_create_household_with_currency(self):
+        # Создаём Household через API и явно указываем EUR.
+        #
+        # Это проверяет полный путь:
+        # API → serializer → view → model → database.
+        response = self.client.post(
+            "/api/v1/auth/households/",
+            {
+                "name": "Family Budget",
+                "currency": "EUR",
+            },
+            format="json",
+        )
+
+        # Household должен быть успешно создан.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        # API должен вернуть ту валюту,
+        # которую мы указали при создании.
+        self.assertEqual(
+            response.data["currency"],
+            "EUR",
+        )
+
+        # Получаем Household непосредственно из базы.
+        # Это дополнительно проверяет фактическое сохранение currency.
+        household = Household.objects.get(
+            id=response.data["id"]
+        )
+
+        # Убеждаемся, что в базе действительно сохранено EUR.
+        self.assertEqual(
+            household.currency,
+            "EUR",
+        )
+
+    def test_create_household_uses_default_currency(self):
+        # Создаём Household без указания currency.
+        #
+        # Это важно для обратной совместимости:
+        # старый клиент API может пока не передавать новое поле.
+        response = self.client.post(
+            "/api/v1/auth/households/",
+            {
+                "name": "Family Budget",
+            },
+            format="json",
+        )
+
+        # Household должен успешно создаться.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        # Если currency не передана,
+        # модель должна использовать значение по умолчанию — CZK.
+        self.assertEqual(
+            response.data["currency"],
+            "CZK",
+        )
+
+        # Проверяем фактическое значение в базе данных.
+        household = Household.objects.get(
+            id=response.data["id"]
+        )
+
+        # Убеждаемся, что default действительно сохранился.
+        self.assertEqual(
+            household.currency,
+            "CZK",
+        )
+
+    def test_create_household_with_invalid_currency(self):
+        # Пытаемся создать Household с валютой GBP.
+        #
+        # Сейчас GBP отсутствует среди разрешённых
+        # валют UserSettings.Currency.
+        response = self.client.post(
+            "/api/v1/auth/households/",
+            {
+                "name": "Family Budget",
+                "currency": "GBP",
+            },
+            format="json",
+        )
+
+        # Serializer должен отклонить неизвестную валюту.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Ошибка должна относиться именно к currency.
+        self.assertIn(
+            "currency",
+            response.data,
+        )
+
+        # Household не должен быть создан.
+        #
+        # Здесь предполагается, что до этого теста
+        # в БД нет других Household, созданных самим тестом.
+        self.assertEqual(
+            Household.objects.count(),
+            0,
+        )
+
+    def test_update_household_currency(self):
+        # Сначала создаём Household с валютой CZK.
+        #
+        # Это исходное состояние, которое затем будем изменять.
+        response = self.client.post(
+            "/api/v1/auth/households/",
+            {
+                "name": "Family Budget",
+                "currency": "CZK",
+            },
+            format="json",
+        )
+
+        # Household должен быть создан.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        household_id = response.data["id"]
+
+        # Изменяем валюту Household с CZK на EUR.
+        #
+        # Используем PATCH, потому что меняем только одно поле,
+        # а остальные данные Household должны остаться без изменений.
+        response = self.client.patch(
+            f"/api/v1/auth/households/{household_id}/",
+            {
+                "currency": "EUR",
+            },
+            format="json",
+        )
+
+        # OWNER должен иметь право изменить валюту Household.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+    # API должен вернуть новую валюту.
+        self.assertEqual(
+            response.data["currency"],
+            "EUR",
+        )
+
+    # Дополнительно проверяем значение непосредственно в БД.
+        household = Household.objects.get(
+            id=household_id
+        )
+
+        # Убеждаемся, что изменение действительно сохранилось.
+        self.assertEqual(
+            household.currency,
+            "EUR",
+        )

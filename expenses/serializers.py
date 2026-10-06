@@ -20,6 +20,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "amount",
+            "currency",
             "category",
             "category_name",
             "goal",

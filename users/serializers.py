@@ -139,6 +139,7 @@ class HouseholdSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
+            "currency",
             "created_by",
             "created_at",
             "updated_at",

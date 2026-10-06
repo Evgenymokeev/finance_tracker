@@ -19,6 +19,7 @@ def create_expense(
     date,
     description="",
     goal=None,
+    currency="CZK",
 ):
     if isinstance(date, str):
         date = date_type.fromisoformat(date)
@@ -31,6 +32,7 @@ def create_expense(
         goal=goal,
         date=date,
         description=description or "",
+        currency=currency,
     )
 
     if not settings.TESTING:

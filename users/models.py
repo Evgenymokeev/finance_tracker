@@ -110,6 +110,12 @@ class Household(models.Model):
         max_length=255,
     )
 
+    currency = models.CharField(
+        max_length=3,
+        choices=UserSettings.Currency.choices,
+        default=UserSettings.Currency.CZK,
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

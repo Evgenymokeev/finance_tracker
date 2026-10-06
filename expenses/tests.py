@@ -1079,3 +1079,126 @@ class ExpenseAPITest(APITestCase):
             response.data["errors"][0]["error"],
             "Date is required.",
         )
+
+# =========================================================
+# CURRENCY
+# =========================================================
+
+    def test_create_expense_with_currency(self):
+        # Создаём новый расход через API
+        # и явно указываем валюту EUR.
+        response = self.client.post(
+            "/api/v1/expenses/",
+            {
+                "title": "Dinner",
+                "amount": "25.00",
+                "currency": "EUR",
+                "category": self.category.id,
+                "date": "2026-09-30",
+                "description": "Dinner in Prague",
+            },
+            format="json",
+        )
+
+        # API должен успешно создать новый расход.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        # Проверяем, что API вернул именно ту валюту,
+        # которую передал пользователь.
+        self.assertEqual(
+            response.data["currency"],
+            "EUR",
+        )
+
+        # Получаем созданный расход непосредственно из базы.
+        # Это позволяет проверить не только ответ API,
+        # но и фактическое сохранение валюты.
+        expense = Expense.objects.get(
+            id=response.data["id"]
+        )
+
+        # Проверяем, что EUR действительно сохранился
+        # в базе данных.
+        self.assertEqual(
+            expense.currency,
+            "EUR",
+        )
+
+    def test_create_expense_uses_default_currency(self):
+        # Создаём расход без явного указания currency.
+        #
+        # Это проверяет поведение существующих клиентов API,
+        # которые ещё не знают о новом поле currency.
+        response = self.client.post(
+            "/api/v1/expenses/",
+            {
+                "title": "Coffee",
+                "amount": "80.00",
+                "category": self.category.id,
+                "date": "2026-09-30",
+            },
+            format="json",
+        )
+
+        # Расход должен быть успешно создан.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        # Если currency не передана,
+        # модель должна использовать валюту по умолчанию — CZK.
+        self.assertEqual(
+            response.data["currency"],
+            "CZK",
+        )
+
+        # Дополнительно проверяем значение непосредственно
+        # в базе данных.
+        expense = Expense.objects.get(
+            id=response.data["id"]
+        )
+
+        # Убеждаемся, что default действительно сохранился.
+        self.assertEqual(
+            expense.currency,
+            "CZK",
+        )
+
+    def test_create_expense_with_invalid_currency(self):
+        # Пытаемся создать расход с валютой,
+        # которой нет среди разрешённых choices.
+        response = self.client.post(
+            "/api/v1/expenses/",
+            {
+                "title": "Coffee",
+                "amount": "80.00",
+                "currency": "GBP",
+                "category": self.category.id,
+                "date": "2026-09-30",
+            },
+            format="json",
+        )
+
+        # API должно отклонить некорректное значение
+        # и вернуть ошибку валидации.
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        # Ошибка должна относиться именно к полю currency.
+        self.assertIn(
+            "currency",
+            response.data,
+        )
+
+        # Проверяем, что некорректный расход
+        # вообще не был создан.
+        self.assertEqual(
+            Expense.objects.count(),
+            0,
+        )
