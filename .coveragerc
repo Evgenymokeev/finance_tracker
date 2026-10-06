@@ -2,6 +2,7 @@
 source =
     analytics,
     categories,
+    currency,
     expenses,
     users,
     budgets,
