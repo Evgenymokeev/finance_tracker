@@ -32,6 +32,7 @@ class UserSettings(models.Model):
         CZK = "CZK", "Czech koruna"
         EUR = "EUR", "Euro"
         USD = "USD", "US dollar"
+        RUB = "RUB", "Russian ruble"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
