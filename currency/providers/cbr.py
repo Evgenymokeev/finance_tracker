@@ -48,18 +48,18 @@ class CBRExchangeRateProvider(ExchangeRateProvider):
         Получает курсы CBR и преобразует их
         в нормализованный формат ExchangeRateData.
 
-        CBR предоставляет курсы относительно RUB,
-        поэтому базовой валютой результата является RUB
-        только для обратного направления? Нет:
+        CBR предоставляет курсы иностранных валют
+        относительно RUB.
 
-        исходный CBR курс:
+        Например, исходный курс CBR:
 
-            USD → RUB
+            1 USD = 80.50 RUB
 
-        поэтому provider сохраняет:
+        преобразуется в:
 
-            base_currency = USD
-            target_currency = RUB
+            base_currency = "USD"
+            target_currency = "RUB"
+            rate = Decimal("80.50")
         """
 
         rates = self.fetch_rates(rate_date)

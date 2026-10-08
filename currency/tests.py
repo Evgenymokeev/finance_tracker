@@ -8,7 +8,7 @@ from django.test import TestCase
 
 from categories.models import Category
 from expenses.models import Expense
-
+from .rate_updater import RateUpdater
 from .models import ExchangeRate
 from .providers.base import (
     ExchangeRateData,
@@ -1882,4 +1882,377 @@ class CBRExchangeRateProviderTests(TestCase):
         self.assertEqual(
             rates,
             [],
+        )
+
+
+class RateUpdaterTests(TestCase):
+    """
+    Проверяет persistence и validation слоя RateUpdater.
+    """
+
+    def setUp(self):
+        """
+        Создаёт updater и общую дату
+        для тестов.
+        """
+
+        self.updater = RateUpdater()
+        self.rate_date = date(2026, 10, 7)
+
+    def test_update_creates_exchange_rate(self):
+        """
+        Проверяет создание нового курса.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate=Decimal("24.4050000000"),
+            date=self.rate_date,
+        )
+
+        result = self.updater.update([rate_data])
+
+        self.assertEqual(result, 1)
+
+        exchange_rate = ExchangeRate.objects.get(
+            base_currency="EUR",
+            target_currency="CZK",
+            date=self.rate_date,
+        )
+
+        self.assertEqual(
+            exchange_rate.rate,
+            Decimal("24.4050000000"),
+        )
+
+    def test_update_creates_multiple_exchange_rates(self):
+        """
+        Проверяет сохранение нескольких курсов
+        за один вызов.
+        """
+
+        rates = [
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="CZK",
+                rate=Decimal("24.4050000000"),
+                date=self.rate_date,
+            ),
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="USD",
+                rate=Decimal("1.1650000000"),
+                date=self.rate_date,
+            ),
+            ExchangeRateData(
+                base_currency="USD",
+                target_currency="RUB",
+                rate=Decimal("80.5000000000"),
+                date=self.rate_date,
+            ),
+        ]
+
+        result = self.updater.update(rates)
+
+        self.assertEqual(result, 3)
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            3,
+        )
+
+    def test_update_returns_zero_for_empty_iterable(self):
+        """
+        Проверяет обработку пустого набора курсов.
+        """
+
+        result = self.updater.update([])
+
+        self.assertEqual(result, 0)
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_accepts_generator(self):
+        """
+        Проверяет, что updater работает не только
+        со списком, но и с любым Iterable.
+        """
+
+        def generate_rates():
+            yield ExchangeRateData(
+                base_currency="EUR",
+                target_currency="CZK",
+                rate=Decimal("24.4050000000"),
+                date=self.rate_date,
+            )
+            yield ExchangeRateData(
+                base_currency="EUR",
+                target_currency="USD",
+                rate=Decimal("1.1650000000"),
+                date=self.rate_date,
+            )
+
+        result = self.updater.update(
+            generate_rates()
+        )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            2,
+        )
+
+    def test_update_updates_existing_rate(self):
+        """
+        Проверяет обновление существующего курса
+        для той же пары валют и даты.
+        """
+
+        ExchangeRate.objects.create(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate=Decimal("24.0000000000"),
+            date=self.rate_date,
+        )
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate=Decimal("24.4050000000"),
+            date=self.rate_date,
+        )
+
+        result = self.updater.update([rate_data])
+
+        self.assertEqual(result, 1)
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            1,
+        )
+
+        exchange_rate = ExchangeRate.objects.get(
+            base_currency="EUR",
+            target_currency="CZK",
+            date=self.rate_date,
+        )
+
+        self.assertEqual(
+            exchange_rate.rate,
+            Decimal("24.4050000000"),
+        )
+
+    def test_update_is_idempotent(self):
+        """
+        Проверяет идемпотентность повторного запуска
+        с одинаковыми данными.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate=Decimal("24.4050000000"),
+            date=self.rate_date,
+        )
+
+        first_result = self.updater.update([rate_data])
+        second_result = self.updater.update([rate_data])
+
+        self.assertEqual(first_result, 1)
+        self.assertEqual(second_result, 1)
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            1,
+        )
+
+    def test_update_rejects_unsupported_base_currency(self):
+        """
+        Проверяет отклонение неизвестной базовой валюты.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="XXX",
+            target_currency="CZK",
+            rate=Decimal("24.4050000000"),
+            date=self.rate_date,
+        )
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Unsupported base currency: XXX",
+        ):
+            self.updater.update([rate_data])
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_rejects_unsupported_target_currency(self):
+        """
+        Проверяет отклонение неизвестной целевой валюты.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="XXX",
+            rate=Decimal("24.4050000000"),
+            date=self.rate_date,
+        )
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Unsupported target currency: XXX",
+        ):
+            self.updater.update([rate_data])
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_rejects_same_currencies(self):
+        """
+        Проверяет запрет курса валюты самой к себе.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="EUR",
+            rate=Decimal("1.0000000000"),
+            date=self.rate_date,
+        )
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Base and target currencies must be different.",
+        ):
+            self.updater.update([rate_data])
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_rejects_zero_rate(self):
+        """
+        Проверяет запрет нулевого курса.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate=Decimal("0"),
+            date=self.rate_date,
+        )
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Exchange rate must be positive.",
+        ):
+            self.updater.update([rate_data])
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_rejects_negative_rate(self):
+        """
+        Проверяет запрет отрицательного курса.
+        """
+
+        rate_data = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate=Decimal("-1.0000000000"),
+            date=self.rate_date,
+        )
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Exchange rate must be positive.",
+        ):
+            self.updater.update([rate_data])
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_rolls_back_all_changes_on_validation_error(self):
+        """
+        Проверяет атомарность batch-операции.
+
+        Если один курс в batch невалиден,
+        ранее сохранённые курсы также откатываются.
+        """
+
+        rates = [
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="CZK",
+                rate=Decimal("24.4050000000"),
+                date=self.rate_date,
+            ),
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="XXX",
+                rate=Decimal("1.0000000000"),
+                date=self.rate_date,
+            ),
+        ]
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Unsupported target currency: XXX",
+        ):
+            self.updater.update(rates)
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
+        )
+
+    def test_update_rolls_back_all_changes_when_later_rate_is_invalid(self):
+        """
+        Проверяет, что rollback происходит для всего batch,
+        даже если ошибка возникает после нескольких
+        успешно обработанных курсов.
+        """
+
+        rates = [
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="CZK",
+                rate=Decimal("24.4050000000"),
+                date=self.rate_date,
+            ),
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="USD",
+                rate=Decimal("1.1650000000"),
+                date=self.rate_date,
+            ),
+            ExchangeRateData(
+                base_currency="EUR",
+                target_currency="EUR",
+                rate=Decimal("1.0000000000"),
+                date=self.rate_date,
+            ),
+        ]
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Base and target currencies must be different.",
+        ):
+            self.updater.update(rates)
+
+        self.assertEqual(
+            ExchangeRate.objects.count(),
+            0,
         )
