@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -163,6 +164,16 @@ CELERY_BEAT_SCHEDULE = {
     "process-automatic-savings": {
         "task": "goals.tasks.process_automatic_savings",
         "schedule": 60.0,
+    },
+    "update-ecb-exchange-rates": {
+        "task": "currency.tasks.update_exchange_rates",
+        "schedule": crontab(hour=16, minute=0),
+        "args": ("ecb",),
+    },
+    "update-cbr-exchange-rates": {
+        "task": "currency.tasks.update_exchange_rates",
+        "schedule": crontab(hour=16, minute=0),
+        "args": ("cbr",),
     },
 }
 

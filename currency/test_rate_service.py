@@ -175,3 +175,73 @@ class RateServiceTests(SimpleTestCase):
 
         self.assertIs(service.provider, self.provider)
         self.assertIsInstance(service.updater, RateUpdater)
+
+    def test_filters_unsupported_currencies(self):
+        unsupported_rate = ExchangeRateData(
+            base_currency="EUR",
+            target_currency="CNY",
+            rate=Decimal("7.5000000000"),
+            date=self.rate_date,
+        )
+
+        self.provider.get_rates.return_value = [
+            *self.rates,
+            unsupported_rate,
+        ]
+
+        result = self.service.update_rates(self.rate_date)
+
+        self.assertEqual(result, 2)
+        self.updater.update.assert_called_once_with(self.rates)
+
+    def test_returns_zero_when_all_currencies_are_unsupported(self):
+        unsupported_rate = ExchangeRateData(
+            base_currency="CNY",
+            target_currency="JPY",
+            rate=Decimal("20.0000000000"),
+            date=self.rate_date,
+        )
+
+        self.provider.get_rates.return_value = [unsupported_rate]
+        self.updater.update.return_value = 0
+
+        result = self.service.update_rates(self.rate_date)
+
+        self.assertEqual(result, 0)
+        self.updater.update.assert_called_once_with([])
+
+    def test_filters_same_currency_pairs(self):
+        same_currency_rate = ExchangeRateData(
+            base_currency="RUB",
+            target_currency="RUB",
+            rate=Decimal("1.0000000000"),
+            date=self.rate_date,
+        )
+
+        self.provider.get_rates.return_value = [
+            *self.rates,
+            same_currency_rate,
+        ]
+
+        result = self.service.update_rates(self.rate_date)
+
+        self.assertEqual(result, 2)
+        self.updater.update.assert_called_once_with(self.rates)
+
+    def test_returns_zero_when_all_rates_have_same_currency(self):
+        same_currency_rate = ExchangeRateData(
+            base_currency="RUB",
+            target_currency="RUB",
+            rate=Decimal("1.0000000000"),
+            date=self.rate_date,
+        )
+
+        self.provider.get_rates.return_value = [
+            same_currency_rate,
+        ]
+        self.updater.update.return_value = 0
+
+        result = self.service.update_rates(self.rate_date)
+
+        self.assertEqual(result, 0)
+        self.updater.update.assert_called_once_with([])
