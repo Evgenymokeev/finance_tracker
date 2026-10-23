@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db.models import Sum
+from currency.models import ExchangeRate
 from django_filters.rest_framework import DjangoFilterBackend
 
 from rest_framework import status, viewsets
@@ -11,10 +11,9 @@ from rest_framework.response import Response
 
 from drf_spectacular.utils import extend_schema
 
-from expenses.models import Expense
-
 from .models import Budget
 from .serializers import BudgetSerializer
+from .services import calculate_budget_spending
 
 
 @extend_schema(
@@ -75,34 +74,19 @@ class BudgetViewSet(viewsets.ModelViewSet):
     def progress(self, request, pk=None):
         budget = self.get_object()
 
-        start_date = budget.month
-
-        if budget.month.month == 12:
-            next_month = budget.month.replace(
-                year=budget.month.year + 1,
-                month=1,
-                day=1,
+        try:
+            spent_amount = calculate_budget_spending(budget)
+        except ExchangeRate.DoesNotExist as exc:
+            return Response(
+                {
+                    "detail": (
+                        "Budget spending cannot be calculated because "
+                        "an exchange rate is missing."
+                    ),
+                    "error": str(exc),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        else:
-            next_month = budget.month.replace(
-                month=budget.month.month + 1,
-                day=1,
-            )
-
-        spent_amount = (
-            Expense.objects
-            .filter(
-                user=request.user,
-                category=budget.category,
-                date__gte=start_date,
-                date__lt=next_month,
-            )
-            .aggregate(
-                total=Sum("amount"),
-            )
-            ["total"]
-            or Decimal("0.00")
-        )
 
         remaining_amount = budget.amount - spent_amount
 

@@ -1,16 +1,20 @@
-from decimal import Decimal
-
 from celery import shared_task
-from django.db.models import Sum
 
-from expenses.models import Expense
 from notifications.models import Notification
 
 from .models import Budget
+from .services import calculate_budget_spending
 
 
 @shared_task
 def check_budget_exceeded(budget_id):
+    """
+    Проверяет превышение месячного бюджета.
+
+    Сумма расходов рассчитывается сервисом с учётом валюты
+    бюджета и конвертации расходов по историческим курсам.
+    """
+
     try:
         budget = Budget.objects.select_related(
             "user",
@@ -21,20 +25,8 @@ def check_budget_exceeded(budget_id):
     except Budget.DoesNotExist:
         return f"Budget {budget_id} not found"
 
-    spent_amount = (
-        Expense.objects
-        .filter(
-            user=budget.user,
-            category=budget.category,
-            date__year=budget.month.year,
-            date__month=budget.month.month,
-        )
-        .aggregate(
-            total=Sum("amount"),
-        )
-        .get("total")
-        or Decimal("0.00")
-    )
+    # Рассчитываем расходы в валюте бюджета.
+    spent_amount = calculate_budget_spending(budget)
 
     if spent_amount <= budget.amount:
         return {

@@ -189,3 +189,51 @@ class FinancialGoalSerializerTests(TestCase):
             "user",
             serializer.validated_data,
         )
+
+    def test_currency_defaults_to_czk(self):
+        """
+        Проверяет, что модель финансовой цели
+        использует CZK по умолчанию.
+        """
+        goal = FinancialGoal.objects.create(
+            user=self.user,
+            title="Накопить на MacBook",
+            target_amount=Decimal("50000.00"),
+            current_amount=Decimal("10000.00"),
+        )
+
+        self.assertEqual(goal.currency, "CZK")
+
+    def test_valid_currency_is_accepted(self):
+        """Проверяет, что поддерживаемая валюта EUR проходит валидацию."""
+        data = {
+            "title": "Накопить на MacBook",
+            "target_amount": "50000.00",
+            "current_amount": "10000.00",
+            "currency": "EUR",
+        }
+
+        serializer = FinancialGoalSerializer(data=data)
+
+        self.assertTrue(
+            serializer.is_valid(),
+            serializer.errors,
+        )
+        self.assertEqual(
+            serializer.validated_data["currency"],
+            "EUR",
+        )
+
+    def test_invalid_currency_is_rejected(self):
+        """Проверяет отклонение неподдерживаемой валюты GBP."""
+        data = {
+            "title": "Накопить на MacBook",
+            "target_amount": "50000.00",
+            "current_amount": "10000.00",
+            "currency": "GBP",
+        }
+
+        serializer = FinancialGoalSerializer(data=data)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("currency", serializer.errors)

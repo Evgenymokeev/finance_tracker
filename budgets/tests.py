@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from categories.models import Category
+from currency.models import ExchangeRate
 from expenses.models import Expense
 from notifications.models import Notification
 from .models import Budget
@@ -937,4 +938,267 @@ class BudgetAPITest(APITestCase):
         self.assertEqual(
             Notification.objects.count(),
             0,
+        )
+
+    def test_create_budget_with_eur_currency(self):
+        """Проверяет создание бюджета с валютой EUR через API."""
+        data = {
+            "category": self.category.id,
+            "amount": "10000.00",
+            "currency": "EUR",
+            "month": "2026-08-01",
+        }
+
+        response = self.client.post(
+            "/api/v1/budgets/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(response.data["currency"], "EUR")
+
+        budget = Budget.objects.get(id=response.data["id"])
+        self.assertEqual(budget.currency, "EUR")
+
+    def test_budget_currency_defaults_to_czk(self):
+        """Проверяет валюту CZK по умолчанию при создании модели."""
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        self.assertEqual(budget.currency, "CZK")
+
+    def test_create_budget_with_invalid_currency(self):
+        """Проверяет отклонение неподдерживаемой валюты."""
+        data = {
+            "category": self.category.id,
+            "amount": "10000.00",
+            "currency": "GBP",
+            "month": "2026-08-01",
+        }
+
+        response = self.client.post(
+            "/api/v1/budgets/",
+            data,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(Budget.objects.count(), 0)
+
+    def test_update_budget_currency(self):
+        """Проверяет изменение валюты существующего бюджета."""
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            month="2026-08-01",
+        )
+
+        response = self.client.patch(
+            f"/api/v1/budgets/{budget.id}/",
+            {"currency": "EUR"},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(response.data["currency"], "EUR")
+
+        budget.refresh_from_db()
+        self.assertEqual(budget.currency, "EUR")
+
+    def test_budget_progress_converts_expense_currency(self):
+        """
+        Проверяет, что расходы в EUR конвертируются
+        в валюту бюджета CZK по курсу на дату расхода.
+        """
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            currency="CZK",
+            month="2026-08-01",
+        )
+
+        ExchangeRate.objects.create(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate="25.0000000000",
+            date="2026-08-10",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="100.00",
+            currency="EUR",
+            date="2026-08-10",
+            description="Expense in EUR",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["spent_amount"],
+            "2500.00",
+        )
+
+        self.assertEqual(
+            response.data["remaining_amount"],
+            "7500.00",
+        )
+
+        self.assertEqual(
+            response.data["percentage_used"],
+            25.0,
+        )
+
+        self.assertFalse(
+            response.data["is_exceeded"],
+        )
+
+    def test_budget_progress_returns_error_when_exchange_rate_missing(self):
+        """
+        Проверяет, что API не возвращает неполный расчёт,
+        если для конвертации расхода отсутствует курс.
+        """
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            currency="CZK",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="100.00",
+            currency="EUR",
+            date="2026-08-10",
+            description="Expense without exchange rate",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+        self.assertIn(
+            "exchange rate is missing",
+            response.data["detail"],
+        )
+
+    def test_budget_progress_sums_expenses_in_multiple_currencies(self):
+        """
+        Проверяет, что расходы в разных валютах сначала
+        конвертируются в валюту бюджета, а затем суммируются.
+        """
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            currency="CZK",
+            month="2026-08-01",
+        )
+
+        ExchangeRate.objects.create(
+            base_currency="EUR",
+            target_currency="CZK",
+            rate="25.0000000000",
+            date="2026-08-10",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="100.00",
+            currency="EUR",
+            date="2026-08-10",
+            description="Expense in EUR",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="500.00",
+            currency="CZK",
+            date="2026-08-11",
+            description="Expense in CZK",
+        )
+
+        response = self.client.get(
+            f"/api/v1/budgets/{budget.id}/progress/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["spent_amount"],
+            "3000.00",
+        )
+
+        self.assertEqual(
+            response.data["remaining_amount"],
+            "7000.00",
+        )
+
+    def test_check_budget_exceeded_does_not_create_notification_without_exchange_rate(self):
+        """
+        Проверяет, что при отсутствии курса задача не создаёт
+        уведомление о превышении на основании неполного расчёта.
+        """
+        budget = Budget.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="10000.00",
+            currency="CZK",
+            month="2026-08-01",
+        )
+
+        Expense.objects.create(
+            user=self.user,
+            category=self.category,
+            amount="500.00",
+            currency="EUR",
+            date="2026-08-10",
+            description="Expense without exchange rate",
+        )
+
+        with self.assertRaises(ExchangeRate.DoesNotExist):
+            check_budget_exceeded(budget.id)
+
+        self.assertFalse(
+            Notification.objects.filter(
+                user=self.user,
+                budget=budget,
+                notification_type=Notification.NotificationType.BUDGET_EXCEEDED,
+            ).exists()
         )

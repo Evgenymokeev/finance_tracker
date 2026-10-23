@@ -110,6 +110,16 @@ class FinancialGoalViewSetTests(APITestCase):
             Decimal("500000.00"),
         )
 
+        self.assertEqual(
+            goal.currency,
+            "CZK",
+        )
+
+        self.assertEqual(
+            response.data["currency"],
+            "CZK",
+        )
+
     def test_list_goals_returns_only_current_user_goals(self):
         """
         Проверяет изоляцию данных пользователей.
@@ -387,6 +397,78 @@ class FinancialGoalViewSetTests(APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_create_goal_with_eur_currency(self):
+        """Проверяет создание финансовой цели в EUR через API."""
+        url = reverse("financial-goal-list")
+
+        data = {
+            "title": "Накопить на автомобиль",
+            "target_amount": "500000.00",
+            "current_amount": "100000.00",
+            "currency": "EUR",
+        }
+
+        response = self.client.post(
+            url,
+            data,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(response.data["currency"], "EUR")
+
+        goal = FinancialGoal.objects.get(id=response.data["id"])
+        self.assertEqual(goal.currency, "EUR")
+
+    def test_update_goal_currency(self):
+        """Проверяет изменение валюты существующей цели."""
+        goal = self.create_goal()
+
+        url = reverse(
+            "financial-goal-detail",
+            kwargs={"pk": goal.id},
+        )
+
+        response = self.client.patch(
+            url,
+            {"currency": "EUR"},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(response.data["currency"], "EUR")
+
+        goal.refresh_from_db()
+        self.assertEqual(goal.currency, "EUR")
+
+    def test_create_goal_with_invalid_currency(self):
+        """Проверяет, что API отклоняет неподдерживаемую валюту."""
+        url = reverse("financial-goal-list")
+
+        data = {
+            "title": "Накопить на автомобиль",
+            "target_amount": "500000.00",
+            "current_amount": "100000.00",
+            "currency": "GBP",
+        }
+
+        response = self.client.post(
+            url,
+            data,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
         )
 
     

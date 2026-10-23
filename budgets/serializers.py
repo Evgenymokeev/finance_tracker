@@ -16,6 +16,7 @@ class BudgetSerializer(serializers.ModelSerializer):
             "category",
             "category_name",
             "amount",
+            "currency",
             "month",
             "created_at",
             "updated_at",

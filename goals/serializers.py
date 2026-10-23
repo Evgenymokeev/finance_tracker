@@ -31,6 +31,7 @@ class FinancialGoalSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "target_amount",
+            "currency",
             "current_amount",
             "deadline",
             "description",
