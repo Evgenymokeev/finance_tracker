@@ -1,6 +1,10 @@
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
 from drf_spectacular.utils import extend_schema
 
 from .deposit_serializers import GoalDepositSerializer
@@ -36,11 +40,46 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        """
+        Возвращает только финансовые цели текущего пользователя.
+        """
+
         return FinancialGoal.objects.filter(
             user=self.request.user
         )
 
+    def _get_locked_object(self):
+        """
+        Получает финансовую цель с блокировкой строки в БД.
+
+        select_for_update() предотвращает одновременное изменение
+        баланса и статуса одной цели несколькими запросами.
+
+        Метод должен вызываться внутри transaction.atomic().
+        """
+
+        queryset = (
+            self.filter_queryset(self.get_queryset())
+            .select_for_update()
+        )
+
+        goal = get_object_or_404(
+            queryset,
+            pk=self.kwargs["pk"],
+        )
+
+        self.check_object_permissions(
+            self.request,
+            goal,
+        )
+
+        return goal
+
     def perform_create(self, serializer):
+        """
+        Автоматически связывает новую цель с текущим пользователем.
+        """
+
         serializer.save(
             user=self.request.user
         )
@@ -67,22 +106,13 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         Правила:
         - cancelled цель нельзя пополнять;
-        - если после пополнения достигнут target_amount,
-          цель становится completed.
+        - completed цель нельзя пополнять;
+        - сумма пополнения не может превышать остаток до цели;
+        - при достижении target_amount цель становится completed.
+
+        Изменение баланса и создание транзакции выполняются
+        в одной атомарной операции.
         """
-
-        goal = self.get_object()
-
-        # Отменённую цель больше нельзя пополнять.
-        if goal.status == FinancialGoal.Status.CANCELLED:
-            return Response(
-                {
-                    "status": (
-                        "Cancelled goals cannot receive deposits."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         serializer = GoalDepositSerializer(
             data=request.data
@@ -94,37 +124,75 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         amount = serializer.validated_data["amount"]
 
-        remaining_amount = (
-            goal.target_amount - goal.current_amount
-        )
+        with transaction.atomic():
+            goal = self._get_locked_object()
 
-        effective_amount = min(
-            amount,
-            remaining_amount,
-        )
+            # Отменённую цель больше нельзя пополнять.
+            if goal.status == FinancialGoal.Status.CANCELLED:
+                return Response(
+                    {
+                        "status": (
+                            "Cancelled goals cannot receive deposits."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        goal.current_amount += effective_amount
+            # Завершённую цель нельзя пополнять повторно.
+            if goal.status == FinancialGoal.Status.COMPLETED:
+                return Response(
+                    {
+                        "status": (
+                            "Completed goals cannot receive deposits."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        if goal.current_amount >= goal.target_amount:
-            goal.current_amount = goal.target_amount
-            goal.status = FinancialGoal.Status.COMPLETED
+            remaining_amount = (
+                goal.target_amount - goal.current_amount
+            )
 
-        goal.save()
+            if remaining_amount <= 0:
+                return Response(
+                    {
+                        "status": (
+                            "Goal has no remaining amount to deposit."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        GoalSavingTransaction.objects.create(
-            goal=goal,
-            amount=effective_amount,
-            transaction_type=(
-                GoalSavingTransaction.TransactionType.DEPOSIT
-            ),
-            source=(
-                GoalSavingTransaction.Source.MANUAL
-            ),
-        )
+            # Нельзя зачислить больше, чем осталось до цели.
+            effective_amount = min(
+                amount,
+                remaining_amount,
+            )
 
-        response_serializer = FinancialGoalSerializer(
-            goal
-        )
+            goal.current_amount += effective_amount
+
+            # Проверяем достижение целевой суммы.
+            if goal.current_amount >= goal.target_amount:
+                goal.current_amount = goal.target_amount
+                goal.status = FinancialGoal.Status.COMPLETED
+
+            goal.save()
+
+            # Сохраняем историю пополнения.
+            GoalSavingTransaction.objects.create(
+                goal=goal,
+                amount=effective_amount,
+                transaction_type=(
+                    GoalSavingTransaction.TransactionType.DEPOSIT
+                ),
+                source=(
+                    GoalSavingTransaction.Source.MANUAL
+                ),
+            )
+
+            response_serializer = FinancialGoalSerializer(
+                goal
+            )
 
         return Response(
             response_serializer.data,
@@ -156,20 +224,10 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
         - нельзя снять больше текущей суммы;
         - если completed цель уменьшилась ниже target_amount,
           она снова становится active.
+
+        Изменение баланса и создание транзакции выполняются
+        в одной атомарной операции.
         """
-
-        goal = self.get_object()
-
-        # Отменённую цель больше нельзя изменять.
-        if goal.status == FinancialGoal.Status.CANCELLED:
-            return Response(
-                {
-                    "status": (
-                        "Cancelled goals cannot be withdrawn from."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         serializer = GoalWithdrawSerializer(
             data=request.data
@@ -181,42 +239,59 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         amount = serializer.validated_data["amount"]
 
-        if amount > goal.current_amount:
-            return Response(
-                {
-                    "amount": (
-                        "Withdraw amount cannot exceed "
-                        "the current goal amount."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+        with transaction.atomic():
+            goal = self._get_locked_object()
+
+            # Отменённую цель больше нельзя изменять.
+            if goal.status == FinancialGoal.Status.CANCELLED:
+                return Response(
+                    {
+                        "status": (
+                            "Cancelled goals cannot be withdrawn from."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Проверяем доступный баланс после получения блокировки.
+            if amount > goal.current_amount:
+                return Response(
+                    {
+                        "amount": (
+                            "Withdraw amount cannot exceed "
+                            "the current goal amount."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            goal.current_amount -= amount
+
+            # Если снятие уменьшило завершённую цель ниже target,
+            # возвращаем её в активное состояние.
+            if (
+                goal.current_amount < goal.target_amount
+                and goal.status == FinancialGoal.Status.COMPLETED
+            ):
+                goal.status = FinancialGoal.Status.ACTIVE
+
+            goal.save()
+
+            # Сохраняем историю снятия.
+            GoalSavingTransaction.objects.create(
+                goal=goal,
+                amount=amount,
+                transaction_type=(
+                    GoalSavingTransaction.TransactionType.WITHDRAWAL
+                ),
+                source=(
+                    GoalSavingTransaction.Source.MANUAL
+                ),
             )
 
-        goal.current_amount -= amount
-
-        if (
-            goal.current_amount < goal.target_amount
-            and goal.status
-            == FinancialGoal.Status.COMPLETED
-        ):
-            goal.status = FinancialGoal.Status.ACTIVE
-
-        goal.save()
-
-        GoalSavingTransaction.objects.create(
-            goal=goal,
-            amount=amount,
-            transaction_type=(
-                GoalSavingTransaction.TransactionType.WITHDRAWAL
-            ),
-            source=(
-                GoalSavingTransaction.Source.MANUAL
-            ),
-        )
-
-        response_serializer = FinancialGoalSerializer(
-            goal
-        )
+            response_serializer = FinancialGoalSerializer(
+                goal
+            )
 
         return Response(
             response_serializer.data,
@@ -242,39 +317,42 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
         - completed нельзя отменить;
         - cancelled нельзя отменить повторно;
         - текущая накопленная сумма не изменяется.
+
+        Изменение статуса выполняется атомарно.
         """
 
-        goal = self.get_object()
+        with transaction.atomic():
+            goal = self._get_locked_object()
 
-        # Завершённую цель отменять нельзя.
-        if goal.status == FinancialGoal.Status.COMPLETED:
-            return Response(
-                {
-                    "status": (
-                        "Completed goals cannot be cancelled."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            # Завершённую цель отменять нельзя.
+            if goal.status == FinancialGoal.Status.COMPLETED:
+                return Response(
+                    {
+                        "status": (
+                            "Completed goals cannot be cancelled."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Нельзя отменить уже отменённую цель повторно.
+            if goal.status == FinancialGoal.Status.CANCELLED:
+                return Response(
+                    {
+                        "status": (
+                            "Goal is already cancelled."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Active -> Cancelled.
+            goal.status = FinancialGoal.Status.CANCELLED
+            goal.save()
+
+            response_serializer = FinancialGoalSerializer(
+                goal
             )
-
-        # Нельзя отменить уже отменённую цель повторно.
-        if goal.status == FinancialGoal.Status.CANCELLED:
-            return Response(
-                {
-                    "status": (
-                        "Goal is already cancelled."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Active -> Cancelled.
-        goal.status = FinancialGoal.Status.CANCELLED
-        goal.save()
-
-        response_serializer = FinancialGoalSerializer(
-            goal
-        )
 
         return Response(
             response_serializer.data,
@@ -294,7 +372,6 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
         Возвращает историю операций финансовой цели.
 
         История содержит:
-
         - ручные пополнения;
         - ручные снятия;
         - автоматические пополнения.
@@ -304,6 +381,7 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
         Endpoint предназначен только для чтения.
         """
+
         goal = self.get_object()
 
         transactions = GoalSavingTransaction.objects.filter(
@@ -315,4 +393,6 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
             many=True,
         )
 
-        return Response(serializer.data)
+        return Response(
+            serializer.data
+        )

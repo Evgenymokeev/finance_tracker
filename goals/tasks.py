@@ -14,41 +14,59 @@ from .services import calculate_next_run_at
 def process_automatic_savings():
     now = timezone.now()
 
-    automatic_savings = (
+    due_saving_ids = (
         GoalAutomaticSaving.objects
-        .select_related("goal")
         .filter(
             is_active=True,
             next_run_at__lte=now,
             goal__status=FinancialGoal.Status.ACTIVE,
         )
+        .values_list("id", flat=True)
     )
 
     processed = 0
 
-    for automatic_saving in automatic_savings:
+    for saving_id in due_saving_ids:
         with transaction.atomic():
+            # Сначала блокируем цель. Ручные операции будут использовать
+            # тот же порядок блокировок, чтобы избежать взаимных блокировок.
+            goal_id = (
+                GoalAutomaticSaving.objects
+                .filter(id=saving_id)
+                .values_list("goal_id", flat=True)
+                .first()
+            )
+
+            if goal_id is None:
+                continue
+
+            try:
+                goal = (
+                    FinancialGoal.objects
+                    .select_for_update()
+                    .get(id=goal_id)
+                )
+            except FinancialGoal.DoesNotExist:
+                continue
+
             automatic_saving = (
                 GoalAutomaticSaving.objects
                 .select_for_update()
-                .select_related("goal")
-                .get(id=automatic_saving.id)
+                .filter(id=saving_id, goal_id=goal.id)
+                .first()
             )
+
+            if automatic_saving is None:
+                continue
 
             if (
                 not automatic_saving.is_active
                 or automatic_saving.next_run_at > now
-                or automatic_saving.goal.status
-                != FinancialGoal.Status.ACTIVE
+                or goal.status != FinancialGoal.Status.ACTIVE
             ):
                 continue
 
-            goal = automatic_saving.goal
-
-            remaining_amount = (
-                goal.target_amount - goal.current_amount
-            )
-
+            remaining_amount = goal.target_amount - goal.current_amount
             saving_amount = min(
                 automatic_saving.amount,
                 remaining_amount,
@@ -72,7 +90,6 @@ def process_automatic_savings():
             if goal.current_amount >= goal.target_amount:
                 goal.current_amount = goal.target_amount
                 goal.status = FinancialGoal.Status.COMPLETED
-
                 automatic_saving.is_active = False
 
             goal.save(
@@ -103,6 +120,4 @@ def process_automatic_savings():
 
             processed += 1
 
-    return {
-        "processed": processed,
-    }
+    return {"processed": processed}

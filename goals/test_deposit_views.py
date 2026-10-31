@@ -563,3 +563,71 @@ class FinancialGoalDepositViewTests(APITestCase):
                 goal=self.goal
             ).exists()
         )
+
+    def test_completed_goal_cannot_receive_deposit(self):
+        """
+        Проверяет, что завершённую финансовую цель
+        нельзя пополнять повторно.
+
+        API должен вернуть HTTP 400,
+        а баланс цели должен остаться неизменным.
+        """
+
+        self.goal.current_amount = self.goal.target_amount
+        self.goal.status = FinancialGoal.Status.COMPLETED
+        self.goal.save()
+
+        url = self.get_deposit_url(self.goal)
+
+        response = self.client.post(
+            url,
+            {"amount": "5000.00"},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.goal.refresh_from_db()
+
+        self.assertEqual(
+            self.goal.current_amount,
+            Decimal("50000.00"),
+        )
+
+        self.assertEqual(
+            self.goal.status,
+            FinancialGoal.Status.COMPLETED,
+        )
+
+    def test_completed_goal_deposit_does_not_create_transaction(self):
+        """
+        Проверяет, что попытка пополнения завершённой цели
+        не создаёт запись в истории операций.
+        """
+
+        self.goal.current_amount = self.goal.target_amount
+        self.goal.status = FinancialGoal.Status.COMPLETED
+        self.goal.save()
+
+        url = self.get_deposit_url(self.goal)
+
+        response = self.client.post(
+            url,
+            {"amount": "5000.00"},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertEqual(
+            GoalSavingTransaction.objects.filter(
+                goal=self.goal
+            ).count(),
+            0,
+        )
