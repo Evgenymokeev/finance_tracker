@@ -10,6 +10,7 @@ from drf_spectacular.utils import extend_schema
 from .deposit_serializers import GoalDepositSerializer
 from .models import (
     FinancialGoal,
+    GoalAutomaticSaving,
     GoalSavingTransaction,
 )
 from .serializers import (
@@ -177,6 +178,17 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
                 goal.status = FinancialGoal.Status.COMPLETED
 
             goal.save()
+
+            # Если цель достигнута, отключаем автоматические накопления.
+            # Обновление выполняется в той же транзакции,
+            # что изменение баланса и создание истории пополнения.
+            if goal.status == FinancialGoal.Status.COMPLETED:
+                GoalAutomaticSaving.objects.filter(
+                    goal=goal,
+                    is_active=True,
+                ).update(
+                    is_active=False,
+                )
 
             # Сохраняем историю пополнения.
             GoalSavingTransaction.objects.create(
