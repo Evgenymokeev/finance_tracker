@@ -14,22 +14,56 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 from celery.schedules import crontab
+from django.core.exceptions import ImproperlyConfigured
+from urllib.parse import urlsplit
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+# Read boolean environment variables safely.
+def env_bool(name, default=False):
+    """
+    Convert an environment variable to a boolean value.
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-*mp7flp#%bfr0lmio++@1_ag*deq6i=-$acuno!2t$u!g8o9tu'
+    This avoids treating the string "False" as True.
+    """
+    value = os.getenv(name)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+    if value is None:
+        return default
 
-ALLOWED_HOSTS = []
+    return value.strip().lower() in ("true", "1", "yes", "on")
+
+
+# Security settings
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be configured in environment variables."
+    )
+
+DEBUG = env_bool("DEBUG", default=False)
+
+ALLOWED_HOSTS_ENV = os.getenv("ALLOWED_HOSTS")
+
+if not DEBUG and not ALLOWED_HOSTS_ENV:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS must be configured when DEBUG=False."
+    )
+
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in (ALLOWED_HOSTS_ENV or "localhost,127.0.0.1,web").split(",")
+    if host.strip()
+]
+
+if not ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS must contain at least one valid host."
+    )
 
 
 # Application definition
@@ -184,5 +218,57 @@ CELERY_TASK_ALWAYS_EAGER = os.getenv(
 
 TESTING = os.getenv("TESTING", "False") == "True"
 
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-DEFAULT_FROM_EMAIL = "webmaster@localhost"
+# Email configuration
+# Use SMTP when EMAIL_HOST is configured.
+# Otherwise, print emails to the console during local development.
+
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=True)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", default=False)
+
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "webmaster@localhost",
+)
+
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured(
+        "EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be enabled."
+    )
+
+if EMAIL_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+if not DEBUG and not EMAIL_HOST:
+    raise ImproperlyConfigured(
+        "EMAIL_HOST must be configured when DEBUG=False."
+    )
+
+if not DEBUG and DEFAULT_FROM_EMAIL == "webmaster@localhost":
+    raise ImproperlyConfigured(
+        "DEFAULT_FROM_EMAIL must be configured for production."
+    )
+
+# Базовый URL для ссылок восстановления пароля.
+PASSWORD_RESET_URL = os.getenv(
+    "PASSWORD_RESET_URL",
+    "http://localhost:8000/api/v1/auth/password-reset-confirm/",
+)
+
+if not DEBUG:
+    reset_url_parts = urlsplit(PASSWORD_RESET_URL)
+
+    if (
+        reset_url_parts.scheme != "https"
+        or not reset_url_parts.netloc
+    ):
+        raise ImproperlyConfigured(
+            "PASSWORD_RESET_URL must be a valid HTTPS URL in production."
+        )

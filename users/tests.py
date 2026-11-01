@@ -1,11 +1,15 @@
-from django.contrib.auth.models import User
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
-from django.db import IntegrityError, transaction
-from rest_framework import status
-from rest_framework.test import APITestCase
+
+from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
+from django.db import IntegrityError, transaction
+from django.test import override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+
+from rest_framework import status
+from rest_framework.test import APITestCase
 
 from .models import (
     Household,
@@ -3564,4 +3568,69 @@ class UserProfileAPITest(APITestCase):
         self.assertEqual(
             household.currency,
             "EUR",
+        )
+
+    @override_settings(
+        PASSWORD_RESET_URL=(
+            "https://example.com/reset-password/"
+        )
+    )
+    @patch("users.views.send_mail")
+    def test_password_reset_request_uses_configured_url(
+        self,
+        mock_send_mail,
+    ):
+        """
+        Проверяет, что письмо для сброса пароля использует
+        настроенный URL и содержит корректные UID и token.
+        """
+        self.client.force_authenticate(user=None)
+
+        response = self.client.post(
+            "/api/v1/auth/password-reset/",
+            {"email": "test@example.com"},
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        mock_send_mail.assert_called_once()
+
+        email_message = mock_send_mail.call_args.kwargs["message"]
+
+        # Извлекаем ссылку для сброса пароля из текста письма.
+        reset_url = next(
+            line
+            for line in email_message.splitlines()
+            if line.startswith("https://example.com/reset-password/")
+        )
+
+        parsed_url = urlparse(reset_url)
+        query_params = parse_qs(parsed_url.query)
+
+        self.assertEqual(
+            f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}",
+            "https://example.com/reset-password/",
+        )
+
+        # Проверяем наличие UID и token в параметрах ссылки.
+        self.assertIn("uid", query_params)
+        self.assertIn("token", query_params)
+
+        # Проверяем, что UID соответствует нашему пользователю.
+        self.assertEqual(
+            query_params["uid"][0],
+            urlsafe_base64_encode(
+                force_bytes(self.user.pk)
+            ),
+        )
+
+        # Проверяем, что сгенерированный token действителен.
+        self.assertTrue(
+            default_token_generator.check_token(
+                self.user,
+                query_params["token"][0],
+            )
         )

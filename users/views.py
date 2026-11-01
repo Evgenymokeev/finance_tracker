@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from django.conf import settings
 from django.contrib.auth import get_user_model, update_session_auth_hash
 from django.contrib.auth.tokens import default_token_generator
@@ -80,9 +82,24 @@ class PasswordResetRequestView(generics.GenericAPIView):
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
 
+            # Формируем ссылку для сброса пароля из настроенного базового URL.
+            # URL-кодирование защищает параметры запроса от специальных символов.
+            query_string = urlencode(
+                {
+                    "uid": uid,
+                    "token": token,
+                }
+            )
+
+            separator = (
+                "&"
+                if "?" in settings.PASSWORD_RESET_URL
+                else "?"
+            )
+
             reset_url = (
-                "http://localhost:8000/api/v1/auth/"
-                f"password-reset-confirm/?uid={uid}&token={token}"
+                f"{settings.PASSWORD_RESET_URL}"
+                f"{separator}{query_string}"
             )
 
             send_mail(
