@@ -108,15 +108,10 @@ class Notification(models.Model):
     class Meta:
         ordering = ["-created_at"]
         constraints = [
-            # Старое ограничение сохраняет совместимость
-            # с существующей логикой бюджетных уведомлений.
-            models.UniqueConstraint(
-                fields=["user", "budget", "notification_type"],
-                name="unique_budget_notification",
-            ),
             # Один пользователь не должен получить одно
-            # и то же событие более одного раза.
-            # NULL оставлен для старых записей.
+            # и то же бизнес-событие более одного раза.
+            # Разные event_key могут относиться к одному бюджету.
+            # NULL оставлен для исторических записей.
             models.UniqueConstraint(
                 fields=["user", "event_key"],
                 condition=Q(event_key__isnull=False),
