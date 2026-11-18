@@ -2,7 +2,8 @@
 Сервис создания уведомлений.
 
 Централизует создание событий, обеспечивает идемпотентность
-и сохраняет язык и контекст уведомления на момент его создания.
+по event_key и сохраняет язык и контекст уведомления
+на момент его создания.
 """
 
 from django.db import IntegrityError, transaction
@@ -16,8 +17,8 @@ class NotificationService:
     """
     Единая точка создания уведомлений для приложений проекта.
 
-    Сервис не отправляет уведомления по внешним каналам.
-    Его ответственность — надёжно сохранить событие в базе.
+    Сервис отвечает за сохранение события в базе данных.
+    Отправка по внешним каналам выполняется отдельным механизмом.
     """
 
     @staticmethod
@@ -48,8 +49,15 @@ class NotificationService:
         """
         Создаёт уведомление или возвращает существующее.
 
-        event_key идентифицирует конкретное бизнес-событие
-        и защищает от повторной обработки Celery-задач.
+        event_key идентифицирует конкретное бизнес-событие.
+        Повторная обработка одного события (например, Celery-задачей)
+        не создаёт дубликат.
+
+        Разные event_key могут создавать отдельные уведомления,
+        даже если они относятся к одному пользователю и бюджету.
+
+        Уникальность event_key на уровне пользователя дополнительно
+        защищается ограничением БД от конкурентных INSERT.
 
         Возвращает:
             (notification, created)
@@ -57,7 +65,7 @@ class NotificationService:
         if not event_key:
             raise ValueError("event_key must not be empty")
 
-        # Сначала ищем событие по новому универсальному ключу.
+        # Быстрый путь: событие уже было сохранено ранее.
         existing = Notification.objects.filter(
             user=user,
             event_key=event_key,
@@ -66,24 +74,13 @@ class NotificationService:
         if existing is not None:
             return existing, False
 
-        # Совместимость с уведомлениями старого формата,
-        # созданными до внедрения NotificationService.
-        if budget is not None:
-            existing = Notification.objects.filter(
-                user=user,
-                budget=budget,
-                notification_type=notification_type,
-            ).first()
-
-            if existing is not None:
-                # Заполняем ключ у старой записи, если он отсутствует.
-                if existing.event_key is None:
-                    existing.event_key = event_key
-                    existing.save(update_fields=["event_key"])
-
-                return existing, False
-
         try:
+            # Отдельный atomic-блок создаёт savepoint, если вызывающий
+            # код уже находится внутри транзакции.
+            #
+            # При IntegrityError этот блок откатывается до savepoint,
+            # поэтому повторный SELECT можно безопасно выполнить
+            # после выхода из atomic.
             with transaction.atomic():
                 notification = Notification.objects.create(
                     user=user,
@@ -91,7 +88,7 @@ class NotificationService:
                     event_key=event_key,
                     title=title,
                     message=message,
-                    data=data or {},
+                    data=data if data is not None else {},
                     locale=cls._get_user_locale(user),
                     budget=budget,
                 )
@@ -99,8 +96,12 @@ class NotificationService:
             return notification, True
 
         except IntegrityError:
-            # Другой параллельный процесс мог создать это событие
-            # между предварительной проверкой и INSERT.
+            # Другой процесс мог одновременно создать событие
+            # с тем же user + event_key.
+            #
+            # Уникальное ограничение БД гарантирует, что дубликат
+            # не будет сохранён. После отката savepoint читаем
+            # уже существующую запись.
             existing = Notification.objects.filter(
                 user=user,
                 event_key=event_key,
@@ -109,17 +110,6 @@ class NotificationService:
             if existing is not None:
                 return existing, False
 
-            # Если сработало другое ограничение уникальности,
-            # например старое бюджетное, возвращаем его запись.
-            if budget is not None:
-                existing = Notification.objects.filter(
-                    user=user,
-                    budget=budget,
-                    notification_type=notification_type,
-                ).first()
-
-                if existing is not None:
-                    return existing, False
-
-            # Не скрываем неожиданное нарушение целостности БД.
+            # Если нарушение целостности вызвано другой причиной,
+            # не маскируем ошибку и передаём её выше.
             raise
