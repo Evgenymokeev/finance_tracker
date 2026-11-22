@@ -1,7 +1,6 @@
 from celery import shared_task
 from notifications.models import Notification
-
-from notifications.services import NotificationService
+from notifications.orchestrators import NotificationOrchestrator
 
 from .models import Budget
 from .services import calculate_budget_spending
@@ -15,8 +14,9 @@ def check_budget_exceeded(budget_id):
     Сумма расходов рассчитывается сервисом с учётом валюты
     бюджета и конвертации расходов по историческим курсам.
 
-    При превышении создаётся уведомление через единый
-    NotificationService, который обеспечивает идемпотентность.
+    При превышении создаётся уведомление через
+    NotificationOrchestrator, который обеспечивает
+    идемпотентность и подготовку разрешённых каналов доставки.
     """
 
     try:
@@ -55,7 +55,9 @@ def check_budget_exceeded(budget_id):
         "month": budget.month.strftime("%Y-%m"),
     }
 
-    notification, created = NotificationService.create(
+    # Оркестратор атомарно создаёт уведомление и разрешённые
+    # записи доставки, если такое событие ещё не обрабатывалось.
+    notification, created = NotificationOrchestrator.create(
         user=budget.user,
         notification_type=Notification.NotificationType.BUDGET_EXCEEDED,
         event_key=f"budget:{budget.id}:budget_exceeded",

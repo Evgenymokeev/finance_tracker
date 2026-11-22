@@ -200,11 +200,24 @@ CELERY_RESULT_BACKEND = os.getenv(
     "CELERY_RESULT_BACKEND",
     "redis://redis:6379/0",
 )
+# Celery broker reliability
+#
+# Retry broker connection during worker startup and after
+# temporary connection failures. PostgreSQL remains the
+# source of truth for pending notification deliveries.
+
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_RETRY = True
 
 CELERY_BEAT_SCHEDULE = {
     "process-automatic-savings": {
         "task": "goals.tasks.process_automatic_savings",
         "schedule": 60.0,
+    },
+    # Periodically recover pending notification deliveries from PostgreSQL.
+    "dispatch-pending-notifications": {
+        "task": "notifications.tasks.dispatch_pending_deliveries",
+        "schedule": 30.0,
     },
     "update-ecb-exchange-rates": {
         "task": "currency.tasks.update_exchange_rates",
@@ -225,12 +238,81 @@ CELERY_TASK_ALWAYS_EAGER = os.getenv(
 
 TESTING = os.getenv("TESTING", "False") == "True"
 
+# Notification delivery configuration
+#
+# These settings control retry behavior, delivery locking
+# and SMTP connection timeout.
+
+# Maximum number of attempts for a single notification delivery.
+NOTIFICATION_MAX_ATTEMPTS = int(
+    os.getenv("NOTIFICATION_MAX_ATTEMPTS", "5")
+)
+
+# Initial retry delay in seconds.
+NOTIFICATION_RETRY_BASE_DELAY = int(
+    os.getenv("NOTIFICATION_RETRY_BASE_DELAY", "60")
+)
+
+# Maximum retry delay in seconds.
+NOTIFICATION_RETRY_MAX_DELAY = int(
+    os.getenv("NOTIFICATION_RETRY_MAX_DELAY", "3600")
+)
+
+# Random variation applied to retry delays (0.2 = ±20%).
+NOTIFICATION_RETRY_JITTER = float(
+    os.getenv("NOTIFICATION_RETRY_JITTER", "0.2")
+)
+
+# How long a worker owns a delivery claim, in seconds.
+NOTIFICATION_DELIVERY_LEASE = int(
+    os.getenv("NOTIFICATION_DELIVERY_LEASE", "120")
+)
+
 # Email configuration
 # Use SMTP when EMAIL_HOST is configured.
 # Otherwise, print emails to the console during local development.
 
 EMAIL_HOST = os.getenv("EMAIL_HOST", "")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+# Maximum time in seconds for an SMTP connection.
+EMAIL_TIMEOUT = int(
+    os.getenv("EMAIL_TIMEOUT", "30")
+)
+# Validate notification delivery configuration.
+#
+# Fail fast during startup instead of allowing invalid retry
+# or lease settings to cause unpredictable delivery behavior.
+
+if NOTIFICATION_MAX_ATTEMPTS < 1:
+    raise ImproperlyConfigured(
+        "NOTIFICATION_MAX_ATTEMPTS must be greater than 0."
+    )
+
+if NOTIFICATION_RETRY_BASE_DELAY < 1:
+    raise ImproperlyConfigured(
+        "NOTIFICATION_RETRY_BASE_DELAY must be greater than 0."
+    )
+
+if NOTIFICATION_RETRY_MAX_DELAY < NOTIFICATION_RETRY_BASE_DELAY:
+    raise ImproperlyConfigured(
+        "NOTIFICATION_RETRY_MAX_DELAY must be greater than "
+        "or equal to NOTIFICATION_RETRY_BASE_DELAY."
+    )
+
+if not 0 <= NOTIFICATION_RETRY_JITTER <= 1:
+    raise ImproperlyConfigured(
+        "NOTIFICATION_RETRY_JITTER must be between 0 and 1."
+    )
+
+if EMAIL_TIMEOUT < 1:
+    raise ImproperlyConfigured(
+        "EMAIL_TIMEOUT must be greater than 0."
+    )
+
+if NOTIFICATION_DELIVERY_LEASE <= EMAIL_TIMEOUT:
+    raise ImproperlyConfigured(
+        "NOTIFICATION_DELIVERY_LEASE must be greater than EMAIL_TIMEOUT."
+    )
 
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=True)
 EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", default=False)

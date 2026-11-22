@@ -154,6 +154,16 @@ class NotificationDelivery(models.Model):
         choices=Channel.choices,
     )
 
+    # Снимок адреса получателя на момент создания доставки.
+    # Для EMAIL здесь хранится email пользователя.
+    # Это защищает уже созданную доставку от изменения
+    # адреса в профиле до фактической отправки.
+    recipient = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -163,6 +173,30 @@ class NotificationDelivery(models.Model):
     attempts_count = models.PositiveIntegerField(default=0)
 
     next_attempt_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    # Время, до которого доставка зарезервирована dispatcher
+    # и не должна повторно отправляться в Celery.
+    # Если публикация задачи или запуск worker не состоялись,
+    # резервирование автоматически истечёт.
+    dispatch_locked_until = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    # Время, до которого доставка закреплена за текущим worker.
+    # После истечения lease другой worker сможет восстановить обработку.
+    locked_until = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    # Уникальный токен конкретного захвата доставки.
+    # Не позволяет устаревшему worker перезаписать результат
+    # более новой попытки обработки.
+    claim_token = models.UUIDField(
         null=True,
         blank=True,
     )
